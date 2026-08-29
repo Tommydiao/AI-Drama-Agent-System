@@ -1,0 +1,26 @@
+{
+  "cost_events": [
+    {
+      "amount": 17,
+      "kind": "actual",
+      "operation_id": "project-1:shot-2:video:v1"
+    }
+  ],
+  "hypothesis": "Stable operation_id plus provider lookup prevents a second charge after a lost response.",
+  "operation": {
+    "operation_id": "project-1:shot-2:video:v1",
+    "reconciled_provider_job": "provider-job-001",
+    "state_after_timeout": "SUBMISSION_UNKNOWN"
+  },
+  "provider_request_log": [
+    {
+      "event": "accepted_then_timeout",
+      "operation_id": "project-1:shot-2:video:v1"
+    },
+    {
+      "event": "reconcile_existing_job",
+      "operation_id": "project-1:shot-2:video:v1"
+    }
+  ],
+  "result": "PASS"
+}

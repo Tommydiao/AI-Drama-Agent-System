@@ -1,0 +1,21 @@
+{
+  "hypothesis": "BEGIN IMMEDIATE plus a reservation ledger serializes concurrent upper-bound checks.",
+  "reservation_rows": [
+    {
+      "amount": 60,
+      "operation_id": "shot-2"
+    }
+  ],
+  "result": "PASS",
+  "results": [
+    {
+      "operation_id": "shot-1",
+      "result": "budget_blocked"
+    },
+    {
+      "operation_id": "shot-2",
+      "result": "reserved"
+    }
+  ],
+  "total_budget": 100
+}

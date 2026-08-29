@@ -1,0 +1,5 @@
+{
+  "result": "FAIL",
+  "diagnosis": "The version-evolution scenario was intentionally not marked PASS because SPIKE-01 worker handoff did not complete; the required v1-to-v2 replay must be rerun in the corrected separate-process Temporal fixture.",
+  "next_experiment": "Start v1 at a signal wait, terminate its worker process, launch v2 with workflow.patched, then verify old history selects v1 behavior and a new execution selects v2 behavior."
+}

@@ -1,0 +1,80 @@
+{
+  "actual": {
+    "dialogue": [
+      "lip:s2",
+      "subtitle:s2",
+      "tts:s2",
+      "video:s2"
+    ],
+    "look": [
+      "keyframe:s1",
+      "keyframe:s4",
+      "video:s1",
+      "video:s4"
+    ]
+  },
+  "dag": true,
+  "edges": [
+    {
+      "from": "dialogue:s2",
+      "to": "tts:s2",
+      "type": "AUDIO_SYNC"
+    },
+    {
+      "from": "dialogue:s2",
+      "to": "subtitle:s2",
+      "type": "AUDIO_SYNC"
+    },
+    {
+      "from": "tts:s2",
+      "to": "lip:s2",
+      "type": "DERIVED_FROM"
+    },
+    {
+      "from": "lip:s2",
+      "to": "video:s2",
+      "type": "DERIVED_FROM"
+    },
+    {
+      "from": "video:s2",
+      "to": "video:s3",
+      "type": "CONTINUITY_REFERENCE"
+    },
+    {
+      "from": "look:lead:v1",
+      "to": "keyframe:s1",
+      "type": "LOOK_REFERENCE"
+    },
+    {
+      "from": "look:lead:v1",
+      "to": "keyframe:s4",
+      "type": "LOOK_REFERENCE"
+    },
+    {
+      "from": "keyframe:s1",
+      "to": "video:s1",
+      "type": "DERIVED_FROM"
+    },
+    {
+      "from": "keyframe:s4",
+      "to": "video:s4",
+      "type": "DERIVED_FROM"
+    }
+  ],
+  "expected": {
+    "dialogue": [
+      "lip:s2",
+      "subtitle:s2",
+      "tts:s2",
+      "video:s2"
+    ],
+    "look": [
+      "keyframe:s1",
+      "keyframe:s4",
+      "video:s1",
+      "video:s4"
+    ]
+  },
+  "hypothesis": "Typed edges produce a stable, minimal impact plan and do not treat continuity as an execution invalidation edge.",
+  "result": "PASS"
+}

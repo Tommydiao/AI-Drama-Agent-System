@@ -1,0 +1,10 @@
+{
+  "result": "FAIL",
+  "observed_operation_rows": [
+    {"operation_id": "project-1:shot-1:generate:v1", "accepted_count": 1, "completed_count": 1},
+    {"operation_id": "project-1:shot-2:generate:v1", "accepted_count": 1, "completed_count": 1}
+  ],
+  "observed_activity_sequence": ["shot-1 accepted", "shot-1 completed", "shot-2 accepted", "shot-2 simulated_worker_crash", "shot-2 reconciled"],
+  "diagnosis": "The operation ledger prevented duplicate logical submission after an accepted-then-crashed activity, but the disposable harness did not complete a true worker handoff plus pause/resume. Sticky workflow-task transfer remained unresolved after worker cancellation.",
+  "next_experiment": "Run the same fixture with a separately launched worker process and explicitly controlled task-queue ownership before treating Temporal pause/restart semantics as architecture-ready."
+}
