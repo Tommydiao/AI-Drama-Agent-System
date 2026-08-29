@@ -3,25 +3,44 @@
 > **阶段：EXPLORE（仅调研，不锁定生产架构）**  
 > **日期：2026-08-29**  
 > **输入基线：** `INTENT.md`（Approved）、`02_DECISIONS.md`（Approved）、`03_PRODUCT_SPEC.md`（Draft）、`04_USER_FLOWS.md`（Draft）、`README(1).md`  
-> **约束：** 本报告不修改已批准的 Intent/Decision，不创建应用代码，也不代替后续 Architecture、Data Contracts、State Machines、Provider、Evaluation 或 Security 规格。
+> **约束：** 本报告不修改已批准的 Intent/Decision，不创建生产功能代码，也不代替后续 Architecture、Data Contracts、State Machines、Provider、Evaluation 或 Security 规格。
 
 ---
 
 ## 0. 执行摘要
 
-现有文档在核心方向上高度一致：面向个人创作者、60–90 秒竖屏短剧、镜头级生产、默认自动推进、异常接管、Mock-first、Provider 可替换、有限修复、成本与 Evidence 全程记录。已批准的技术栈 **Next.js + FastAPI + PostgreSQL + Temporal + FFmpeg** 能满足目标，未发现必须推翻 DEC-010 的证据。
+现有文档在核心方向上高度一致：面向个人创作者、60–90 秒竖屏短剧、镜头级生产、默认自动推进、异常接管、Mock-first、Provider 可替换、有限修复、成本与 Evidence 全程记录。
 
-但不应立即锁定完整生产架构。最大的未知并非 CRUD 或页面技术，而是：
+已批准的技术栈 **Next.js + FastAPI + PostgreSQL + Temporal + FFmpeg** 仍然适合当前目标，没有发现需要推翻 DEC-010 的证据。
 
-1. 外部 Provider 通常无法提供真正的端到端 exactly-once；“提交成功但响应丢失”会形成重复付费风险。
-2. Temporal 的确定性、版本演进、取消/暂停语义及自托管运维成本，需要用故障注入证明团队能够正确使用。
-3. Shot Graph 同时混合播放顺序、连续性、生成与资产依赖，若不拆分边类型，局部失效会过度重做或漏做。
-4. “每镜头最多 2 次修复”的计数边界、项目/镜头状态职责、预算预留与最终成本结算尚不精确。
-5. VLM QC、角色一致性、中文口型、真实 Provider 价格/可用性必须经基准样片实测，不能靠架构推断。
+本次 Explore 后，建议进一步明确以下架构原则：
 
-**建议方向：** 采用模块化单体而非微服务；PostgreSQL 保存业务事实，Temporal 保存执行历史，Storage Adapter 保存不可变媒体，FFmpeg/ffprobe 做确定性媒体处理；以显式的 Job/ProviderAttempt/Asset/CostEvent/Evidence 记录连接各层。第一 Mock 里程碑只实现一条纵向闭环与故障注入 Harness，不提前建设真实 Provider、复杂 Agent 框架、WebSocket 基础设施、对象存储或完整 SaaS 权限。
+1. **模块化单体优先，不按 Agent 拆微服务。** FastAPI API、Temporal Worker、Media Worker 可以是不同进程，但共享同一 Python 领域代码库和 PostgreSQL 数据模型。
+2. **PostgreSQL 保存业务事实，Temporal 保存执行历史。** Temporal 不作为 UI 查询数据库，也不保存完整领域真相。
+3. **Shot Graph 与 Timeline 分离。** Timeline 表示播放顺序；Shot Graph 表示执行、派生、连续性、音频同步和失效传播关系。
+4. **不宣称 exactly-once。** 采用 `at-least-once execution + business idempotency + provider reconciliation`，将“请求可能已被 Provider 接收但响应丢失”视为一等风险。
+5. **Repair Budget 只计算创意/QC 驱动的修复循环。** Transport retry、Provider attempt、candidate generation、deterministic media retry 与 creative repair 必须分离计数。
+6. **Mock 必须产生真实可探测媒体文件。** JSON-only mock 不能证明 FFmpeg、字幕、音轨、替换和最终导出链路。
+7. **第一 Mock Milestone 不做过早优化。** 不做微服务、LoRA、本地 GPU 集群、对象存储、复杂 Agent 框架、增量区段渲染和完整 SaaS 权限。
 
-**Gate 建议：** 先完成本文第 10 节的 spikes，尤其是 Temporal 恢复/版本、Provider 不确定提交、FFmpeg 可复现性和进度通道实验；证据通过后，才编写生产架构与数据契约。
+### 本报告的 Product Owner 澄清基线
+
+以下问题已经视为本次 Explore 的已解决输入，不再列为开放产品问题：
+
+- 成片生命周期：`ROUGH_CUT_READY → DELIVERABLE_READY → ACCEPTED`；`PUBLISHED` 不属于 MVP 生产完成状态。
+- 默认 `target_duration = 60s`，MVP 可接受范围 60–90 秒；片头、片尾和黑场计入最终时长。
+- 竖屏 720P 基线：`720×1280`、9:16、30fps、square pixel；精确 codec/profile/audio 参数由 FFmpeg 兼容性实验锁定。
+- 单个 Shot 的 `WAITING_HUMAN` 不暂停无依赖镜头；只有预算、安全/权利、不可消解创作歧义、Provider 级不可恢复故障可以形成项目级阻断。
+- 只有 QC 驱动的 creative repair 消耗每镜头最多 2 次 Repair Budget。
+- 第一个 Mock Milestone 复用未变化资产，但最终 MP4 使用完整、确定性的 FFmpeg 重渲染，不做增量片段缓存。
+- Project Copy 不属于第一个 Mock Milestone；版本、回滚、局部替换必须属于第一个 Mock Milestone。
+
+### Gate 结论
+
+**EXPLORE_GATE = PASS**
+
+Explore 阶段已经足够完成：架构方向、关键风险、最小 Mock 范围、未决问题和必要实验已经被识别。  
+但这不等于 Architecture 已经批准。进入 `05_ARCHITECTURE.md` 前，应先完成本报告第 10 节标记为 **P0** 的最小技术 Spikes，并保存 Evidence。
 
 ---
 
@@ -29,31 +48,32 @@
 
 ## 1.1 仓库现状
 
-仓库当前只包含五份产品文档与 Git 元数据，没有应用代码、依赖清单、测试、CI、架构/数据契约/状态机文档或媒体样例。因此，本次“整个仓库检查”的对象就是：
+当前仓库以产品文档为主：
 
 | 文件 | 状态/作用 | 评估 |
 |---|---|---|
-| `INTENT.md` | Approved — Baseline Locked | 最高层目标、硬约束、成功指标、Mock-first 与停止条件完整；未修改 |
-| `02_DECISIONS.md` | Approved | 17 个已批准决策与 Explore 清单清楚；未修改 |
-| `03_PRODUCT_SPEC.md` | Draft for Review | 功能覆盖完整，但若干术语和状态边界需在后续规格澄清 |
-| `04_USER_FLOWS.md` | Draft for Review | 主流程、异常、编辑和导出路径清晰；部分流程语义与高层状态未完全闭合 |
-| `README(1).md` | 文档包说明 | 仍写着 Explore “Not Started”，且原建议是在 Product Spec/User Flows 锁定后 Explore；本次 Product Owner 的明确指令已启动 Explore |
+| `INTENT.md` | Approved — Baseline Locked | 最高层产品合同，完整 |
+| `02_DECISIONS.md` | Approved | 关键产品与技术方向已锁定 |
+| `03_PRODUCT_SPEC.md` | Draft for Review | 功能覆盖较完整，需要后续把 Explore 结论回写到术语和边界 |
+| `04_USER_FLOWS.md` | Draft for Review | 主流程和异常流程完整，需要对项目/镜头局部阻断进一步精确化 |
+| `EXPLORE_REPORT.md` | 本报告 | 技术探索与 Gate |
+| `README(1).md` | 文档包说明 | 文件名和阶段状态后续可整理，不影响技术探索 |
 
-没有发现隐藏的实现、历史架构或可复用脚手架。仓库极简使方向清晰，但也意味着所有技术结论目前都是待验证假设。
+当前没有生产代码是合理的。现阶段最重要的是验证 durable workflow、幂等、预算、媒体处理和 Shot invalidation 等高风险假设，而不是提前堆页面或模型 SDK。
 
 ## 1.2 文档一致性结论
 
-以下主线在所有上位文档中一致：
+上位文档一致支持：
 
-- MVP 范围：60–90 秒、9:16、720P、30fps、12–24 镜头、最多 2 个主要角色、1–2 个核心场景、中文普通话。
-- 自动化：启动确认后自动运行到完整草片；只有阻断异常与最终发布需要人介入。
-- 生产单元：镜头级资产、候选、QC、修复与局部重做，而非整片黑盒。
-- 可靠性：持久化状态、显式状态转换、幂等、恢复、已完成资产复用。
-- 治理：修复最多 2 次、付费前预算阻断、安全与权利确认、不可静默降级。
-- 研发：Mock-first、Evidence-gated、先稳定工作流再接真实付费模型。
-- 技术基线：Next.js、FastAPI、PostgreSQL、Temporal、FFmpeg；Storage/Provider 通过 Adapter 隔离。
+- 60–90 秒、9:16、720P、30fps、12–24 镜头。
+- 最多 2 个主要角色、1–2 个核心场景。
+- 默认自动生产到完整草片，异常时才打断用户。
+- 镜头级资产、候选、QC、修复和局部重做。
+- 持久状态、幂等、恢复、成本控制和 Evidence。
+- 每镜头最多 2 次创意/QC 修复。
+- Mock-first、Provider 可替换、先工作流后真实付费模型。
 
-因此，产品方向可以继续 Explore；下面的问题是“需要精确定义或实验”，不是对已批准要求的变更。
+因此，当前主要任务不是改变产品方向，而是把“可靠性语义”变成可实现和可测试的工程契约。
 
 ---
 
@@ -61,190 +81,1228 @@
 
 ## 2.1 保持 DEC-010 技术栈基线
 
-**推荐：** 保持 Next.js + TypeScript、FastAPI + Python、PostgreSQL、Temporal、FFmpeg，不在 Explore 阶段替换。
+**推荐继续采用：**
 
-**为什么：**
+- Next.js + TypeScript：Web UI、项目管理、分镜板、异常中心、草片评审。
+- FastAPI + Python：领域 API、Provider Adapter、AI/媒体编排接口。
+- PostgreSQL：业务事实、版本、预算、成本、Evidence、幂等唯一约束。
+- Temporal：跨分钟/小时/天的 durable workflow、timer、retry、signal/update、恢复。
+- FFmpeg/ffprobe：确定性媒体探测、转码、合成、字幕和技术 QC。
 
-- Next.js 适合项目列表、分镜板、时间线预览和异常中心；其官方文档也明确把 Route Handlers 定位为 Backend-for-Frontend，并提示它不是完整后端替代品，这支持由 FastAPI 承担领域 API，而不是把生产编排塞进前端运行时。[Next.js Backend for Frontend 指南](https://nextjs.org/docs/app/guides/backend-for-frontend)
-- Python 是 AI SDK、媒体分析和数据处理的共同语言；FastAPI 提供 OpenAPI、类型验证和异步 HTTP 边界，适合 Provider 与工作流控制面。[FastAPI 文档](https://fastapi.tiangolo.com/)
-- PostgreSQL 适合关系完整性、版本/事件元数据、预算账本、幂等唯一约束和查询视图；`LISTEN/NOTIFY` 可作为轻量失效通知，但官方说明通知在事务提交后交付，因此它不应承担持久任务队列。[PostgreSQL NOTIFY](https://www.postgresql.org/docs/current/sql-notify.html)
-- Temporal 的 durable execution、Activity retry、timer、signal/update 适配跨小时/天的生产流程；工作流重放要求确定性，这正好迫使编排逻辑与不确定的 Provider I/O 分离。[Temporal Workflow Definition](https://docs.temporal.io/workflow-definition)
-- FFmpeg/ffprobe 是编码、拼接、音轨、字幕和技术探测的成熟确定性工具；ffprobe 支持机器可读输出，适合作为技术 QC 证据。[ffprobe 文档](https://ffmpeg.org/ffprobe.html)
+Next.js 不负责核心生产编排；FastAPI 也不自己实现长任务持久队列。Temporal 处理执行历史，PostgreSQL 处理用户可查询的领域事实。
 
-**替代方案：** Next.js 全栈、Python 单体服务端渲染、Node 后端、Redis/Celery、云厂商队列、Prefect/Dagster、纯 PostgreSQL 队列、托管媒体服务。
+参考：
 
-**权衡：** 已选栈增加两个应用运行时与 Temporal 运维，但避免让 Node 承担 AI/媒体生态适配，也比自行实现 durable workflow 更可靠。现阶段替换的迁移收益没有证据。
+- [Next.js Backend for Frontend](https://nextjs.org/docs/app/guides/backend-for-frontend)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [Temporal Workflow Definition](https://docs.temporal.io/workflow-definition)
+- [Temporal Retry Policies](https://docs.temporal.io/encyclopedia/retry-policies)
+- [ffprobe](https://ffmpeg.org/ffprobe.html)
 
-## 2.2 验证“模块化单体优先”，而非微服务/多 Agent
+## 2.2 模块化单体，而非微服务/多 Agent 服务化
 
-**推荐：** FastAPI API、Temporal worker 和 media worker 可以是独立进程/容器，但共享一个 Python 领域代码库和 PostgreSQL schema；按部署进程隔离资源，不按“故事 Agent/导演 Agent/QC Agent”拆微服务。
+MVP 不按 Story Agent、Director Agent、QC Agent 拆微服务。
 
-**为什么：** MVP 只有单创作者和一条基准流程。状态、预算、资产与失效传播需要强一致边界；过早拆服务会引入分布式事务、契约发布和可观测性成本。LLM 节点只是受 Schema 约束的 Activity，不需要每个逻辑角色拥有独立框架。
+建议部署单元可以拆进程：
 
-**替代方案与权衡：**
+```text
+web                 Next.js
+api                 FastAPI
+workflow-worker     Temporal Python Worker
+media-worker        FFmpeg / ffprobe task queue
+postgres            PostgreSQL
+temporal            Temporal dev / managed service
+```
 
-- 单进程：最简单，但 FFmpeg 或高并发轮询会影响 API。
-- 微服务：独立扩缩容强，但两周 Mock 里程碑不值得其运维/契约成本。
-- 模块化单体 + 多 worker queue：提供足够隔离，也保留以后按热点拆分的路径；这是当前最佳平衡。
+但业务代码仍共享：
 
-## 2.3 验证 Mock-first 与关键帧先行
+```text
+domain/
+application/
+workflows/
+providers/
+media/
+repositories/
+contracts/
+```
 
-**推荐：** Mock 必须生成真实可探测的图片、视频、音频和字幕文件，而不是只在数据库把任务标成成功；关键帧是高成本视频前的显式 Gate。
+逻辑 Agent 只是受 Schema 和状态机约束的能力节点，不需要每个角色拥有独立进程、独立数据库或独立 Agent Framework。
 
-**为什么：** 只有真实容器格式才能暴露时间基、帧率、音频采样率、路径、FFmpeg 转义和替换重导出问题。关键帧能以低成本先验证身份、场景、道具与构图，符合成本约束。
+## 2.3 Mock-first 与关键帧先行
 
-**替代方案：** JSON-only mock 很快但无法证明媒体闭环；直接真实 Provider 可验证画质但会掩盖幂等与恢复缺陷并消耗预算。
+Mock 必须生成真实媒体：
 
-**证据：** 上位文档明确要求 Mock 资产经过真实任务队列、状态机和 FFmpeg 成片；ffprobe 可输出稳定的机器可读媒体元数据作为 Gate 证据。[ffprobe 文档](https://ffmpeg.org/ffprobe.html)
+- PNG/JPEG 关键帧
+- MP4 视频镜头
+- WAV/AAC 音频
+- SRT 字幕
+- 最终 MP4
+
+这些媒体可以通过 FFmpeg/color bars/testsrc/sine wave/静态图片等确定性方式生成，但必须能被 ffprobe 检查。
+
+这样才能真正验证：
+
+- 文件路径和 Storage Adapter
+- 帧率和时间基
+- 字幕编码
+- 音画长度
+- Timeline 替换
+- 最终重新导出
+- crash recovery 后资产复用
 
 ---
 
-# 3. Inconsistencies found（不一致、歧义与缺失约束）
+# 3. Inconsistencies / clarified constraints（不一致与已澄清约束）
 
-## 3.1 需要 Product Owner 澄清但不阻断 Explore
+## 3.1 已澄清，不再阻断 Architecture
 
-| 编号 | 发现 | 影响 | 建议澄清（不在本报告改需求） |
-|---|---|---|---|
-| I-01 | `README(1).md` 说 Product Spec/User Flows 锁定后才 Explore，但二者仍是 Draft | Gate 状态与本次阶段不一致 | 将本次明确指令视为 Explore 授权；后续由 PO 决定是否先批准两份 Draft |
-| I-02 | `COMPLETED` 有两种时点：技术 QC 后产出生产包，或“用户确认下载/发布”后 | 状态机、通知与验收会不同 | 区分 `DELIVERABLE_READY`、用户 `ACCEPTED` 与外部 `PUBLISHED`；是否新增状态由后续状态机评审决定 |
-| I-03 | 默认目标时长在用户流程为 60 秒，但 MVP 承诺是 60–90 秒 | 60 秒是否包含端点、黑场不清 | 明确 target duration、允许窗口及片头片尾是否计入 |
-| I-04 | “720P”未明确竖屏像素、SAR/DAR、编码 profile、色彩空间、音频 codec/sample rate | FFmpeg Gate 无法唯一判定 | 后续 Evaluation/Delivery Spec 固定如 720×1280、方形像素及容器编码参数；需设备兼容测试后锁定 |
-| I-05 | 技术 QC、视觉 QC 失败都使用“每镜头 2 次修复”，但重新封装、Provider 可恢复重试、候选生成与创意修复的计数边界不清 | 可绕过上限或过早人工接管 | 分离 transport attempt、candidate attempt、repair cycle、deterministic transcode attempt；只有受控 repair cycle 使用两次预算 |
-| I-06 | `WAITING_USER` 是 Project 状态，但单镜头失败不应阻塞无依赖镜头 | 全局状态可能停止过多工作 | Project 派生健康状态与 Shot/Issue 局部阻断分离；仅预算/安全/必要创作决策触发全局付费启动 Gate |
-| I-07 | Project 与 Shot 状态枚举未覆盖规划、音频、字幕、渲染、取消中、对账未知等细节 | 强塞状态会产生非法跳转 | 高层状态留作用户视图；Job/Asset/Review/Issue 各自拥有生命周期，后续状态机明确聚合规则 |
-| I-08 | “暂停”要求不启动新付费任务，但已提交任务继续对账；没有定义暂停一致点、Temporal workflow 自身是否暂停 | 恢复后可能漏事件或重复调度 | 定义 cooperative pause：写入持久 pause intent，workflow 在每次调度付费 Activity 前检查；in-flight job 继续 reconcile |
-| I-09 | “任务重放不得重复付费”容易被理解成 exactly-once，但第三方 Provider 未必接受幂等键或按客户 request ID 查询 | 最高财务风险 | 把能力表中的 idempotency/reconciliation 作为 Provider 准入条件；无法对账时进入 `UNKNOWN` 人工处理，不自动重提 |
-| I-10 | Shot Graph 同时表达播放顺序、首尾帧、道具、台词、并行与修改影响 | 边的语义与失效传播不明确，DAG 也可能出现创作循环 | 使用带类型、有方向、版本化的依赖边；播放顺序放 Timeline，生产依赖保持 DAG；连续性引用不等同于执行阻塞 |
-| I-11 | 修改台词前要求展示影响并确认，与“默认只有三类必要干预”表面冲突 | 主动编辑是否属于额外 Gate | 这是用户主动操作后的成本确认，而非自动主流程 Gate；应在 UX 文案中明确 |
-| I-12 | `SRT 或等价格式` 与“字幕样式预览”混在一起；SRT 不完整承载样式 | 导出与预览不一致 | 文本/时间语义与渲染样式分开；SRT 用于交换，样式另存结构化模板或 ASS（待兼容性测试） |
-| I-13 | “只重合成受影响区段或最终文件”没有定义是否必须增量渲染 | 可能过早优化且引入 GOP/音频接缝问题 | Mock 先复用源资产但完整重渲染最终文件；是否区段缓存由 benchmark 决定 |
-| I-14 | 项目复制、版本回滚、删除都在 Product Spec，User Flows 又把“项目复制是否进入 MVP”列为待评审 | 两周 Mock 范围不确定 | Mock 必须证明版本回滚（上位 Intent）；项目复制是否在首 Mock 里程碑由 PO 决定 |
-| I-15 | Evidence 要保留输入/Prompt/日志，删除与隐私要求又要求资产可删除；没有保留期限与脱敏规则 | 审计和删除权冲突 | Evidence 保存哈希、ID、结构化摘要与必要元数据；凭证、签名 URL、敏感原文不得进入清单；保留策略交安全规格 |
-| I-16 | 技术通过率 ≥95% 对 12–24 镜头项目可能意味着允许一个失败镜头，但 `COMPLETED` 又不得包含未通过技术校验的成片 | 指标分母和 Release Gate 不清 | 区分 generation-attempt 技术通过率与 selected deliverable 的 100% 技术合格要求 |
-| I-17 | 成本要求按项目/场景/镜头查看，但项目级故事、音乐、最终渲染不天然属于某镜头 | 归因会失真 | CostEvent 支持可空 scene/shot 与 allocation rule；展示“直接成本”和“分摊成本” |
-| I-18 | 第一版单用户但又要求用户资产访问控制，首版登录未决 | 无主体就无法定义授权/删除审计 | Mock 使用固定本地 workspace/actor，仍在每条记录保留 `workspace_id`/`actor_id`；不等于生产 Auth 方案 |
+| 编号 | 结论 |
+|---|---|
+| C-01 | 完成生命周期采用 `ROUGH_CUT_READY → DELIVERABLE_READY → ACCEPTED` |
+| C-02 | `PUBLISHED` 不属于 MVP 生产工作流状态 |
+| C-03 | 默认目标 60 秒，MVP 允许 60–90 秒，所有片头片尾计入 |
+| C-04 | 竖屏媒体基线 720×1280 / 30fps / square pixel |
+| C-05 | Transport retry、Provider attempt、Candidate、Media retry、Creative Repair 分开计数 |
+| C-06 | 单个 Shot 等待人工不暂停无依赖 Shot |
+| C-07 | 只有项目级预算、安全、权利、必要创作决策和 Provider 级硬故障阻断新的项目级付费工作 |
+| C-08 | Mock 阶段最终视频完整重渲染，不做增量 GOP/片段缓存 |
+| C-09 | 第一个 Mock Milestone 不实现 Project Copy |
+| C-10 | 第一个 Mock Milestone 必须实现版本、回滚、局部镜头替换 |
 
-## 3.2 缺失的技术约束
+## 3.2 后续规格仍需明确
 
-后续规格至少还需明确：
+- Provider、项目、媒体类型的并发和速率限制。
+- HTTP、Provider job、Temporal Activity 和项目级 deadline 的不同超时语义。
+- BudgetReservation 的释放、过期、退款、失败收费和汇率语义。
+- Asset hash、临时文件、原子发布、删除和 scratch directory 清理。
+- Workflow / Prompt / Provider request / Evidence Schema 的版本策略。
+- Provider webhook 签名、重复回调、乱序、重放攻击和下载校验。
+- Evidence 的脱敏和保留期限。
+- FFmpeg 版本、字体和渲染容器镜像固定方式。
 
-- **并发与配额：** 每项目/Provider/媒体类型并发上限、速率限制、背压与公平调度。
-- **超时层级：** HTTP timeout、Provider job timeout、Activity start-to-close/schedule-to-close、项目 deadline 各自含义。
-- **预算语义：** 货币精度、税费/汇率、预估价版本、预留（reservation）、最终结算、退款/失败收费和并发竞态。
-- **资产完整性：** 内容哈希、原始/派生关系、原子写入、临时文件清理、恶意文件扫描、大小/时长上限。
-- **Schema 演进：** 文档、Prompt、Provider input/output、workflow 与 Evidence 的版本兼容策略。
-- **删除与备份：** 软删除/硬删除、Temporal history、数据库备份和对象存储版本中的清除边界。
-- **进度定义：** 阶段/计数/事件，不提供虚假线性百分比或 ETA；重试时如何显示回退。
-- **人工接管租约：** 谁持有 issue、何时超时、恢复后如何解除暂停，避免自动与人工同时修改。
-- **Provider 回调安全：** 签名、重放窗口、重复/乱序回调、出站 URL 防 SSRF、下载内容校验。
-- **媒体 reproducibility：** FFmpeg 版本、字体、filter 参数、seed、时区/locale 和容器镜像摘要。
-- **Shot Graph 失效规则：** 每种 edge 的 invalidation policy、版本快照、影响预览及用户确认后的原子提交。
+这些问题不要求在 Explore 阶段全部锁死，但必须在对应的 Architecture / Security / Evaluation Spec 中有明确归属。
 
 ---
 
 # 4. Architecture options（架构选项）
 
-## 4.1 总体拓扑选项
+## 4.1 总体拓扑
 
-| 选项 | 优点 | 风险/代价 | 结论 |
+| 选项 | 优点 | 风险 | 结论 |
 |---|---|---|---|
-| A. Next.js 全栈 + 队列 | 单语言、部署少 | AI/媒体 Python 生态割裂；长任务与密钥边界弱；与 DEC-010 不符 | 不推荐 |
-| B. FastAPI 模块化单体 + Temporal workers + Next.js | 清晰领域边界；复用 Python schema/adapter；worker 可独立扩容 | 两运行时、契约同步、Temporal 运维 | **推荐方向** |
-| C. 按 Agent/Provider 拆微服务 | 独立扩容与故障域 | 两周 Mock 无法承担分布式事务、部署和契约复杂度 | 暂不推荐 |
-| D. Serverless API + 托管工作流 | 运维较少 | FFmpeg 时长/磁盘限制、Provider 轮询、供应商锁定、成本不确定 | 仅作为部署 spike 候选 |
+| Next.js 全栈 + 简单队列 | 部署少 | AI/媒体 Python 生态差、长任务语义弱 | 不推荐 |
+| **Next.js + FastAPI 模块化单体 + Temporal Workers** | 领域边界清晰、durable execution、媒体生态好 | 两运行时、Temporal 学习成本 | **推荐** |
+| 按 Agent 拆微服务 | 独立扩容 | MVP 复杂度过高、分布式一致性成本大 | 不推荐 |
+| Serverless + 托管工作流 | 运维少 | FFmpeg/长轮询/本地媒体限制、锁定供应商 | 后续再评估 |
 
-### 推荐逻辑
+## 4.2 两层编排
 
-选择 B，但“独立进程”不等于“独立产品微服务”。API 只处理短请求和命令；Temporal workflow 只做确定性编排；Activity 执行 DB、Provider 与媒体副作用；媒体 worker 使用独立 task queue 限制 CPU/磁盘并发。
+建议：
 
-## 4.2 项目编排与 Shot Graph
+### Project Workflow
 
-**推荐：两层编排。**
+```text
+preflight
+→ planning
+→ story / screenplay
+→ bibles
+→ shot planning
+→ fan-out shot work
+→ timeline
+→ rough render
+→ deliverable render
+```
 
-1. **Project Workflow（控制平面）：** preflight → planning → bibles → shot plan → fan-out shot workflows → timeline/render → rough cut；接收 pause/resume/cancel/repair/selection 信号。
-2. **Shot Workflow 或受控 child workflow（执行平面）：** keyframe → generation candidates → QC → bounded repair → approve/escalate。
+接收：
 
-不要让一个 Temporal workflow 承载完整领域真相。PostgreSQL 是用户可查询的业务事实来源；Temporal history 是执行恢复事实来源。二者通过稳定 ID 和带唯一键的 Activity 连接，不做双向“任意状态同步”。
+- pause
+- resume
+- cancel
+- budget update
+- human resolution
+- shot selection
+- dialogue edit impact approval
 
-**Shot Graph 推荐模型：**
+### Shot Workflow / Child Workflow
 
-- 节点是有版本的领域对象/资产需求，而不仅是镜头编号。
-- 边至少区分 `EXECUTION_REQUIRES`、`DERIVED_FROM`、`CONTINUITY_REFERENCE`、`AUDIO_SYNC`、`INVALIDATES_ON_CHANGE`。
-- Timeline 保存播放顺序；执行图必须可拓扑排序。
-- 修改先在数据库事务内生成 impact plan；用户确认后创建新版本并提交 reconcile command，旧资产不可变但可标记 superseded。
+```text
+keyframe
+→ candidate generation
+→ technical QC
+→ semantic/continuity QC
+→ pass
+  or repair cycle 1
+  or repair cycle 2
+  or waiting-human
+```
 
-**替代方案：** 把图完全编码在 Temporal history（查询与影响预览差）；把图完全当数据库队列（需自建 timers/retry/recovery）；使用通用图 Agent 框架（不解决付费副作用与媒体资产一致性）。推荐方案兼顾可查询与 durable execution。
+是否每个 Shot 都必须是独立 Temporal Child Workflow，可以等 P0 Temporal Spike 后再决定；MVP 也可以让 Project Workflow 调度结构化 Shot Activities，只要不会产生无法控制的巨大 history。
 
-## 4.3 状态机方向
+## 4.3 Shot Graph
 
-**推荐：分层、单写者、转换有原因。**
+不要把“视频播放顺序”和“生产依赖”混成一张图。
 
-- Project：用户可理解的聚合生命周期。
-- Shot：镜头生产/审核生命周期。
-- Job/ProviderAttempt：提交、已接受、运行、回调、对账、成功、失败、未知、取消。
-- Asset：临时、已验证、选中、被替代、删除待处理。
-- Issue/Review：open、auto-repairing、waiting-human、resolved、accepted-risk。
+### Timeline
 
-每次转换记录 `from/to/reason/actor/causation_id/correlation_id/version/time`。状态转换由领域服务校验，Temporal 不直接任意写状态；API 也不能越过命令入口改最终状态。UI 项目进度应从这些事实投影，而不是把 Temporal query 当唯一页面数据库。
+保存：
 
-**权衡：** 多个状态机会增加模型数量，但避免一个巨型枚举混合业务、执行、审核和控制语义。
+- 最终播放顺序
+- clip in/out
+- 字幕与音轨时间
+- 转场
 
-## 4.4 长任务、幂等、重试与恢复
+### Dependency Graph
 
-**推荐模式：at-least-once 执行 + 业务幂等 + Provider 对账，而不是声称 exactly-once。**
+建议的 edge type：
 
-1. 每个逻辑副作用创建稳定 `operation_id`，由业务输入版本、任务类型、目标和策略版本决定；不得把每次 retry 的随机 ID 当幂等键。
-2. PostgreSQL 对 `(workspace_id, operation_id)` 建唯一约束；先创建 operation/预算预留，再调用 Provider。
-3. Provider 支持 idempotency key 时传同一 key；支持 client reference/query 时保存外部 job ID 并优先 reconcile。
-4. 提交后响应丢失时进入 `SUBMISSION_UNKNOWN`；先按 key/query 对账。无法证明未提交时，绝不自动再次付费。
-5. Provider 回调写入 inbox 表，以 provider event ID 或规范化 payload hash 去重；Activity 再消费并推进状态。
-6. Asset 使用临时路径写完、校验、计算 hash 后原子发布；相同 operation 的重复结果不污染选中资产。
-7. CostEvent 是 append-only 账本：estimate/reservation/actual/adjustment 分开；对 provider charge/reference 唯一。
+- `EXECUTION_REQUIRES`
+- `DERIVED_FROM`
+- `CONTINUITY_REFERENCE`
+- `AUDIO_SYNC`
+- `INVALIDATES_ON_CHANGE`
 
-Temporal Activity 默认可能重试，官方文档强调 Activity retry policy 和超时需要明确配置；Heartbeat 能报告进度并协助取消/恢复长 Activity。[Temporal Failure Detection](https://docs.temporal.io/develop/python/failure-detection) [Temporal Retry Policies](https://docs.temporal.io/encyclopedia/retry-policies)
+播放先后不等于执行依赖；连续性引用也不一定阻断并行。
 
-**重试分类：**
+修改剧本或台词时：
 
-- 网络抖动、429、可恢复 5xx：指数退避、抖动、Provider rate limit；不消耗创意 repair budget。
-- 认证、余额、内容拒绝、不支持输入：non-retryable，转 Issue。
-- Provider job 仍运行：轮询/回调等待，不重提。
-- 生成成功但 QC 失败：进入最多 2 次 repair cycle，每次产生新 operation/cost。
-- FFmpeg 瞬时 worker 故障：可重试同一 deterministic operation；输入/工具版本相同则复用输出 hash。
+```text
+old version
+→ compute impact plan
+→ user sees affected assets/cost if paid
+→ commit new version
+→ invalidate only matching edges
+→ reconcile affected work
+```
 
-## 4.5 Provider Adapter 架构
+## 4.4 状态分层
 
-**推荐：能力接口而非一个万能 `generate()`。**
+避免一个巨型 `ProjectStatus`。
 
-核心层使用标准命令/结果/错误，但按能力拆分，例如 image generation、video generation、TTS、lip-sync、music、moderation、VLM review。每个 Provider 发布 capability descriptor：输入模式、最大时长/尺寸、reference 数量、seed、区域、取消、callback、idempotency、查询、价格版本和内容限制。
+建议分为：
 
-适配器职责：
+- **Project**：用户理解的聚合状态。
+- **Shot**：镜头生产和审核状态。
+- **Job / ProviderAttempt**：提交、运行、未知、成功、失败、取消、对账。
+- **Asset**：temporary、validated、selected、superseded、delete-pending。
+- **Issue / Review**：open、auto-repairing、waiting-human、resolved、accepted-risk。
+- **BudgetReservation / CostEvent**：预算和成本生命周期。
 
-- 校验并映射标准请求；返回 provider request snapshot（脱敏）。
-- 标准化 accepted/running/succeeded/failed/unknown 与错误分类。
-- 提交、轮询、取消、回调验证、下载校验和成本解析。
-- 暴露明确的能力差异；路由层只有在等价策略或用户批准后切换。
+状态转换记录至少包含：
 
-业务层职责：Shot route、预算、repair policy、选择和状态转换。Adapter 不应决定剧情，不直接改变 Shot 状态，也不把厂商字段扩散到核心表。
+```text
+from
+→ to
+reason
+actor
+correlation_id
+causation_id
+version
+occurred_at
+```
 
-**图片/视频/音频集成风险：** 异步模式差异、临时 URL 过期、输出水印/codec 不一、中文标点与音素、声音授权、native audio 与独立 TTS 的时间绑定、seed 不保证复现、模型静默升级。所有真实 Provider 选择保持未决，使用 capability/contract test 比较。
+## 4.5 幂等、重试和未知提交
 
-## 4.6 资产存储
+正确目标不是“exactly-once”，而是防止重复副作用和重复收费。
 
-**推荐：** 开发期本地文件系统遵守 DEC-011，但从第一天通过 Storage Adapter 使用逻辑 key，例如 `workspaces/{workspace}/projects/{project}/assets/{asset}/{version}`；数据库只保存 storage URI/key、hash、size、media metadata、lineage 与状态。
+### Stable operation_id
 
-- 原始资产和派生资产不可变；选择关系可变且版本化。
-- 同一文件系统上的临时写入 + fsync/rename 后发布；PostgreSQL 事务记录发布结果。
-- 浏览器不接受任意服务器路径；API 返回短期受控下载入口。
-- FFmpeg 在每任务 scratch directory 工作，限定磁盘配额并清理。
+每个逻辑副作用产生稳定 `operation_id`：
 
-**替代方案：** 直接绝对路径最快但阻塞 S3 迁移；Mock 即使用 MinIO 更接近对象存储但增加两周里程碑运维。先本地 adapter，随后用相同 contract test 验证 S3/OSS。
+```text
+workspace
++ project
++ entity/version
++ operation_type
++ provider route
++ strategy version
+```
 
-## 4.7 Cost 与 Evidence tracking
+PostgreSQL 使用唯一约束防止重复创建同一逻辑操作。
 
-**Cost 推荐：** append-only CostEvent + BudgetReservation。付费前在数据库原子检查 `actual + active_reservations + next_upper_bound <= approved_limit`，以整数最小货币单位存储；调用后用 actual 调整 reservation。并发镜头不能各自只读取余额。
+### Provider 提交
 
-**Evidence 推荐：** EvidenceManifest 是可导出的派生索引，不是日志/大文件的第二份复制。每项包含 subject、type、source URI、content hash、schema/tool/model version、产生时间、actor、correlation/causation ID 和验证结果。敏感 Provider request 保存脱敏快照；密钥、authorization header、临时签名 URL 永不进入 Evidence。
+- 支持 idempotency key：重复请求使用同一 key。
+- 支持 client reference / query：保存外部 job id 并优先 reconcile。
+- 请求可能成功但响应丢失：进入 `SUBMISSION_UNKNOWN`。
+- `SUBMISSION_UNKNOWN` 未完成对账前，禁止自动重新付费提交。
 
-**替代方案：** 只从日志重建成本/Evidence 简单但不可审计；事件溯源所有领域数据过重。针对成本、转换与 Evidence 使用 append-only records，其他业务实体保持常规版本表，是更小的方案。
+### Retry taxonomy
+
+| 类型 | 示例 | 是否消耗 2 次 Repair Budget |
+|---|---|---|
+| Transport retry | timeout / 429 / transient 5xx | 否 |
+| Provider attempt | 一次实际提交 | 否，单独计数 |
+| Candidate generation | 同镜头候选 1/2/3 | 否，单独计数 |
+| Deterministic media retry | FFmpeg worker crash | 否 |
+| **Creative repair cycle** | QC 失败后改变 Prompt/route/action | **是** |
+
+## 4.6 Provider Adapter
+
+不设计万能 `generate()`。
+
+核心能力按类型拆：
+
+```text
+ImageProvider
+VideoProvider
+TTSProvider
+LipSyncProvider
+MusicProvider
+ModerationProvider
+VisionReviewProvider
+```
+
+每个实现暴露 capability descriptor，例如：
+
+- 支持输入模式
+- 最大时长/尺寸
+- reference 数量
+- native audio
+- callback / polling
+- cancel
+- idempotency
+- client reference/query
+- 区域
+- price version
+- model version
+- content restrictions
+
+业务层决定 Shot route 和 repair policy；Adapter 只负责协议、映射、状态、下载、错误归一化和成本解析。
+
+## 4.7 Storage / Asset
+
+开发期遵守 DEC-011，使用本地文件系统，但从第一天通过 Storage Adapter。
+
+业务数据保存 logical key，而不是 Windows/Linux 绝对路径：
+
+```text
+workspaces/{workspace}/projects/{project}/assets/{asset}/{version}/{filename}
+```
+
+资产原则：
+
+- 原始和派生文件不可变。
+- selected/superseded 是关系状态，不覆盖物理文件。
+- 写入临时路径 → 验证 → hash → 原子发布。
+- Media Worker 使用每 Job 独立 scratch directory。
+- Storage Adapter contract 后续可复用到 S3/OSS。
 
 ## 4.8 实时进度
+
+### 推荐：MVP 使用 SSE + 普通 REST 查询兜底
+
+不建议第一版直接上 WebSocket。
+
+理由：
+
+- 当前主要需求是 Server → Browser 的生产事件流。
+- 用户不需要通过同一长连接持续双向传控制命令；暂停、恢复、取消可以使用 REST command。
+- SSE 更容易穿过普通 HTTP 基础设施，也更容易实现断线重连。
+- 页面刷新后仍需通过 REST 从 PostgreSQL 投影重新恢复完整状态，不能依赖 event stream 作为事实源。
+
+建议接口形态：
+
+```text
+GET  /projects/{id}
+GET  /projects/{id}/events?after=<cursor>   # SSE
+POST /projects/{id}/commands/pause
+POST /projects/{id}/commands/resume
+POST /projects/{id}/commands/cancel
+```
+
+事件示例：
+
+```json
+{
+  "event_id": "...",
+  "project_id": "...",
+  "subject_type": "shot",
+  "subject_id": "SC01_SH07",
+  "type": "SHOT_QC_FAILED",
+  "stage": "qc",
+  "occurred_at": "..."
+}
+```
+
+### 进度展示原则
+
+不展示虚假的 0–100% ETA。
+
+优先展示：
+
+- 当前 Stage
+- shots completed / total
+- active jobs
+- failed / waiting-human
+- spent / reserved budget
+- 当前正在做什么
+
+SSE 不是 P0 架构阻断项；如果开发环境 SSE 有兼容问题，Mock Milestone 可先使用 2–3 秒轮询，API 事件模型保持不变。
+
+---
+
+# 5. Temporal risks and alternatives
+
+## 5.1 Temporal 的适用点
+
+本项目存在：
+
+- 长运行任务
+- 外部异步 Provider
+- timer / polling / callbacks
+- pause/resume
+- crash recovery
+- bounded repair
+- fan-out shots
+- 需要防止重启后丢状态
+
+因此 Durable Execution 的价值真实存在。
+
+## 5.2 Temporal 的主要风险
+
+### R-TEMP-01 Workflow determinism
+
+Workflow 代码不能随意执行不确定 I/O 或依赖当前时间/随机数；所有副作用必须通过 Activity 或 Temporal API。
+
+**风险：** Codex 若不受约束，很容易把 DB 或 Provider 调用放进 Workflow 逻辑。
+
+**控制：** 在 `AGENTS.md` 和 Architecture 中明确：Workflow 只编排，I/O 全部 Activity 化。
+
+### R-TEMP-02 Workflow version evolution
+
+持续运行的 Project 可能跨部署版本。
+
+**风险：** 直接修改 Workflow 分支会导致 replay nondeterminism。
+
+**控制：** P0 Spike 必须验证 workflow version / patch / continue-as-new 的使用规则，并写进开发规范。
+
+### R-TEMP-03 History growth
+
+12–24 镜头 × 生成 × 轮询 × QC × repair 可能形成很长 history。
+
+**控制：** 避免高频轮询写大量 event；必要时 child workflow / continue-as-new；真实阈值由 Mock benchmark 决定。
+
+### R-TEMP-04 Pause semantics
+
+Temporal 没有“自动冻结所有外部世界”的魔法暂停。
+
+**推荐 cooperative pause：**
+
+1. 持久化 project `pause_intent`。
+2. Workflow 收到 signal/update。
+3. 新的付费 Activity 调度前检查 pause gate。
+4. 已经提交的 Provider job 继续 reconcile。
+5. resume 后从 gate 继续。
+
+### R-TEMP-05 Operational cost
+
+自托管 Temporal 本身有数据库、服务和运维成本。
+
+**MVP 建议：** 本地使用官方 dev server / Docker；生产阶段优先评估 managed Temporal，再决定是否自托管。
+
+## 5.3 Temporal vs Celery/Redis
+
+### Celery 优点
+
+- Python 生态成熟。
+- 简单异步任务容易。
+- 上手成本较低。
+
+### 缺点
+
+本项目仍需自己实现：
+
+- durable orchestration state
+- pause/resume semantics
+- compensation/reconciliation
+- workflow timers
+- long-term state
+- human wait
+- DAG recovery
+
+**结论：** 如果只是“提交视频任务然后轮询”，Celery 足够；但本项目明确要求跨阶段恢复和人工接管，Temporal 更匹配。
+
+## 5.4 Temporal vs PostgreSQL Queue
+
+PostgreSQL queue 可使用 `FOR UPDATE SKIP LOCKED` 等模式完成任务领取。
+
+优点：组件少。
+
+缺点：需要自行实现 retry scheduler、timer、workflow history、pause/resume、fan-out reconciliation、版本迁移和可观测性。
+
+**结论：** 不建议为了省一个组件而自研 durable workflow engine。
+
+## 5.5 Temporal vs Managed Cloud Workflow
+
+AWS Step Functions、GCP Workflows、Azure Durable Functions 等可以承担部分 durable orchestration。
+
+风险：
+
+- 强供应商绑定。
+- 本地开发一致性较差。
+- 媒体 Worker 与 Provider 编排跨环境调试复杂。
+
+**结论：** MVP 保持 Temporal；生产部署时再比较 Temporal Cloud 与具体云服务。
+
+## 5.6 Temporal Gate
+
+**保留 Temporal，但必须通过 P0 Spike。**
+
+如果 P0 Spike 证明：
+
+- 团队无法稳定处理 replay/versioning，或
+- Pause / crash recovery 复杂度明显超过收益，或
+- 本地/部署约束不可接受，
+
+则允许在 ADR 中重新评估 Celery/PostgreSQL queue，而不是因为 DEC-010 已批准就强行保留。
+
+---
+
+# 6. Next.js + FastAPI two-runtime risks
+
+## 6.1 主要风险
+
+### API Contract Drift
+
+TypeScript 与 Pydantic schema 可能漂移。
+
+**建议：** FastAPI OpenAPI 作为传输契约来源；自动生成或校验 TypeScript client/types。领域模型不要求 TS 与 Python 源码共享。
+
+### Authentication Boundary
+
+首 Mock 使用固定 local workspace/actor，不实现生产 Auth。
+
+后续生产 Auth 需要：
+
+- Browser 对 Next.js / FastAPI 的认证策略一致。
+- FastAPI 不相信浏览器提交的任意 `workspace_id`。
+- Provider credential 只在后端。
+
+### Upload / Download Boundary
+
+前端不允许把服务器绝对路径交给用户，也不允许前端持有 Provider key。
+
+Mock：
+
+```text
+Browser → FastAPI upload endpoint → Storage Adapter
+```
+
+生产：可以升级为受控 direct upload / signed URL，但必须通过授权和 metadata registration。
+
+### Two Runtime Operations
+
+两个运行时意味着：
+
+- 两套依赖管理
+- 两个进程生命周期
+- API contract
+- CORS/proxy
+
+**控制：** 不再增加第三个 Node backend；Next.js 专注 BFF/UI，FastAPI 是唯一领域 API。
+
+## 6.2 推荐 API 边界
+
+Next.js 不直接：
+
+- 调用视频/图片/TTS Provider
+- 写 PostgreSQL
+- 操作 Temporal
+- 执行 FFmpeg
+
+Next.js 只通过 FastAPI：
+
+```text
+queries
+commands
+uploads/download access
+progress events
+```
+
+这样 Provider 密钥、预算和状态机只有一个可信后端入口。
+
+---
+
+# 7. Mock-first end-to-end architecture
+
+## 7.1 第一 Mock 所需组件
+
+```text
+[Next.js Web]
+      |
+      v
+[FastAPI Domain API]
+      |
+      +---- [PostgreSQL]
+      |
+      +---- [Temporal Client]
+                |
+                v
+        [Workflow Worker]
+          |           |
+          v           v
+   [Mock Provider] [Media Activities]
+          |           |
+          +-----+-----+
+                v
+        [Storage Adapter]
+                |
+                v
+        [FFmpeg / ffprobe]
+```
+
+## 7.2 Mock Provider 必须做什么
+
+Mock 不需要生成 AI 画质，但必须模拟真实 Provider 行为：
+
+- sync accepted response
+- async job id
+- running delay
+- success
+- transient failure
+- permanent failure
+- submission accepted but HTTP response lost
+- duplicate callback
+- out-of-order callback
+- rate limit
+- cancelable / non-cancelable
+- predictable simulated price
+
+媒体结果必须是真实文件。
+
+## 7.3 Mock 媒体策略
+
+关键帧：使用固定色块、shot id、角色/场景标签生成 PNG。  
+视频：使用 FFmpeg `testsrc/color/drawtext` 生成 2–5 秒 MP4。  
+音频：使用 sine/silence 或固定 WAV。  
+字幕：生成真实 SRT。  
+Timeline：拼接真实 MP4 和音频。  
+技术 QC：ffprobe + 文件检查。
+
+这样 Mock 能证明工程闭环，而不是画质。
+
+## 7.4 明确排除
+
+第一 Mock 不包含：
+
+- Wan 或任何真实付费 Provider
+- LoRA
+- VLM 视觉质量判定
+- 真人声音克隆
+- WebSocket
+- S3/OSS
+- Kubernetes
+- 多租户 Auth
+- 项目复制
+- 增量区段渲染
+- 微服务
+- LangGraph 等复杂 Agent Framework
+
+## 7.5 Failure Injection Harness
+
+Mock Provider 支持按 shot/job 设置 scenario，例如：
+
+```json
+{
+  "shot_id": "SC01_SH07",
+  "scenario": "submission_unknown"
+}
+```
+
+至少支持：
+
+```text
+worker_crash_after_provider_accept
+provider_429_then_success
+provider_permanent_failure
+provider_submission_unknown
+ffmpeg_fail_once
+qc_fail_twice
+budget_exhausted
+pause_during_running_job
+duplicate_callback
+```
+
+这些 scenario 的测试结果进入 `evidence/`。
+
+---
+
+# 8. Minimum Mock milestone
+
+第一个里程碑只证明一条纵向链路，不追求完整 UI。
+
+## 8.1 必须证明
+
+### M-01 Project creation
+
+可以创建一个《门外的人》Mock Project，保存 Brief 和固定 workspace/actor。
+
+### M-02 Planning persistence
+
+可以保存：
+
+- Story
+- Screenplay
+- Character/Location/Prop 最小 Bible
+- 3–5 个 Mock Shot（技术验证阶段不需要一上来 18 个）
+
+> 真实产品目标仍是 12–24 镜头；Mock 技术纵切先用少量镜头以缩短验证时间。
+
+### M-03 Shot Graph
+
+至少证明：
+
+- 一个 execution dependency
+- 一个 continuity reference
+- 一个 audio sync
+- 一个 invalidation rule
+
+### M-04 Async job
+
+Temporal 启动异步 Mock Provider job，worker 重启后可以恢复。
+
+### M-05 Real media files
+
+生成真实 PNG/MP4/WAV/SRT，并通过 ffprobe。
+
+### M-06 QC + bounded repair
+
+一个 Shot 第一次 QC fail → repair → pass；另一个 Shot 连续两次 creative repair fail → `WAITING_HUMAN`。
+
+### M-07 Independent progress
+
+失败 Shot 进入人工等待时，无依赖 Shot 继续完成。
+
+### M-08 Pause/resume
+
+Pause 后不启动新的模拟付费 operation；in-flight mock job 可以完成 reconcile；Resume 后继续。
+
+### M-09 Crash recovery
+
+在 Provider accept 后杀死 Worker，恢复后不创建重复逻辑 operation。
+
+### M-10 Budget blocking
+
+并发两个 Shot 时 BudgetReservation 原子阻止超限。
+
+### M-11 Shot replacement
+
+替换一个 selected clip 后，Timeline 生成新版本并完整重新 FFmpeg render；未变化素材不重新生成。
+
+### M-12 Dialogue change impact
+
+修改一句台词，impact plan 只标记对应 audio/subtitle/lip-sync/video dependency，不污染无关 Shot。
+
+### M-13 Evidence
+
+形成至少包含以下内容的 EvidenceManifest：
+
+- state transitions
+- operations
+- job attempts
+- media hashes
+- ffprobe result
+- budget/cost event
+- failure injection
+- recovery proof
+- final render hash
+
+## 8.2 不要求在首 Mock 完成
+
+- 完整精致前端
+- 18 个镜头完整样片
+- 真实 AI 模型
+- 自动 VLM QC
+- 商业 Auth
+- 云部署
+- 对象存储
+
+---
+
+# 9. Unresolved decisions
+
+## 9.1 Must decide before Architecture is approved
+
+1. Temporal P0 Spike 是否证明 crash recovery / replay / pause 可接受。
+2. `Project Workflow + Shot Child Workflow` 还是 `Project Workflow + Shot Activities`；由 history/复杂度实验决定。
+3. Operation / ProviderAttempt / CostReservation 的幂等和事务边界。
+4. Shot Graph edge schema 与 invalidation policy。
+5. 数据库与 Temporal 的“单写者/命令入口”规则。
+6. 720×1280 最终 Mock codec/audio 参数。
+
+## 9.2 Must decide before real Provider integration
+
+1. 第一批 Image / Video / TTS / Lip-sync Provider。
+2. Provider idempotency/reconciliation capability 准入标准。
+3. 真实 Provider pricing snapshot 和成本换算。
+4. Webhook security。
+5. VLM QC 模型与人工基准。
+6. 真人声音/肖像授权记录粒度。
+7. 对象存储和临时 URL 方案。
+8. Provider 区域可用性与数据处理条款。
+
+## 9.3 Can defer beyond first MVP
+
+- Project Copy
+- 多用户协作
+- SaaS billing
+- LoRA 训练
+- 本地 GPU cluster
+- Kubernetes
+- 增量区段 render cache
+- WebSocket
+- 多语言
+- 8–10 分钟长剧
+
+---
+
+# 10. Required technical spikes / experiments
+
+原则：**Spikes 是短实验，不是提前写生产系统。**  
+只做能改变架构决策的实验。P0 证据通过后即可进入 Architecture，不要求把所有 P1/P2 实验都做完。
+
+## SPIKE-01 — Temporal durability + pause/resume（P0）
+
+**Question**  
+Worker/API 重启后，能否从持久 workflow 状态继续，并正确执行 cooperative pause？
+
+**Hypothesis**  
+Temporal 可以在不重复 logical operation 的前提下恢复；pause 可以阻止新的付费 Activity，同时允许 in-flight job reconcile。
+
+**Minimal experiment**
+
+- 一个 Project Workflow。
+- 三个模拟 Shot。
+- Activity sleep 模拟 Provider。
+- 第二个 job accept 后杀 Worker。
+- 重启 Worker。
+- 中途发 pause，再 resume。
+
+**Pass**
+
+- 已完成 operation 不重复。
+- 恢复后继续。
+- pause 后不启动新 paid-operation。
+- in-flight job 被正确 reconcile。
+
+**Evidence**
+
+- Temporal event history
+- DB operation rows
+- test logs
+- before/after screenshots or CLI output
+
+**Effort** 0.5–1 day。
+
+## SPIKE-02 — Temporal workflow version evolution（P0）
+
+**Question**  
+正在运行的 workflow 跨代码版本部署时如何避免 replay nondeterminism？
+
+**Hypothesis**  
+通过 Temporal 官方 versioning/patch 方式或兼容分支策略可以安全演进。
+
+**Minimal experiment**
+
+- 启动 v1 workflow 并停在 timer/human wait。
+- 部署 v2，改变后续一个分支。
+- replay/继续运行。
+
+**Pass**
+
+- 旧 workflow 可以继续。
+- 新 workflow 使用新路径。
+- replay test 不报 nondeterminism。
+
+**Evidence**
+
+- replay test output
+- event history
+- versioning note
+
+**Effort** 0.5 day。
+
+> SPIKE-01/02 可以在同一临时 Temporal harness 中完成，不需要两个独立项目。
+
+## SPIKE-03 — Provider unknown submission / idempotency（P0）
+
+**Question**  
+Provider 已接受请求但 HTTP response 丢失时，系统是否会重复付费？
+
+**Hypothesis**  
+Stable operation_id + Provider client reference + `SUBMISSION_UNKNOWN` + reconcile 能避免盲目重提。
+
+**Minimal experiment**
+
+Mock Provider：
+
+1. 首次 submit 实际创建 job。
+2. 客户端收到模拟 timeout。
+3. Activity retry。
+4. 使用 operation key 查询原 job。
+
+**Pass**
+
+- Provider 只有一个 logical paid job。
+- DB 只有一个 operation。
+- retry 走 reconcile，不创建第二次 charge。
+
+**Evidence**
+
+- mock provider request log
+- operation/provider_attempt rows
+- cost events
+
+**Effort** 0.5 day。
+
+## SPIKE-04 — Concurrent budget reservation（P0）
+
+**Question**  
+多个 Shot 并发时是否可能同时读取“余额足够”并一起超预算？
+
+**Hypothesis**  
+PostgreSQL 事务 + BudgetReservation 可以原子控制。
+
+**Minimal experiment**
+
+- 总预算 100。
+- 两个并发 operation 各需 upper-bound 60。
+- 并行 reservation。
+
+**Pass**
+
+- 只有一个 reservation 成功。
+- 另一个得到明确 budget blocked。
+- 无负余额或重复 reservation。
+
+**Evidence**
+
+- concurrency test
+- transaction log / rows
+
+**Effort** 0.5 day。
+
+## SPIKE-05 — Shot Graph invalidation（P0）
+
+**Question**  
+修改一句台词或更换一个角色 Look 时，系统能否只失效真实依赖资产？
+
+**Hypothesis**  
+Typed edges + versioned nodes 能产生稳定 impact plan。
+
+**Minimal experiment**
+
+构建 5-shot graph：
+
+- Shot 2 台词影响 TTS/subtitle/lip-sync。
+- Shot 3 continuity reference 不应因普通字幕改动失效。
+- Shot 4 使用同一角色 Look。
+
+分别修改台词和 Look。
+
+**Pass**
+
+- impact set 符合预期 fixture。
+- graph 保持 DAG。
+- 无关 Shot 不失效。
+
+**Evidence**
+
+- graph fixture
+- expected vs actual invalidation JSON
+
+**Effort** 0.5–1 day。
+
+## SPIKE-06 — FFmpeg deterministic render（P0）
+
+**Question**  
+相同输入和工具版本是否可以稳定输出技术规格正确的最终视频？
+
+**Hypothesis**  
+固定 FFmpeg 版本、输入、滤镜和 metadata 后可得到可重复技术结果；字节级 hash 是否完全一致作为实验结果记录，不作为产品硬承诺。
+
+**Minimal experiment**
+
+- 3 个短 MP4
+- 1 WAV
+- 1 SRT
+- 720×1280 / 30fps
+- 连续 render 两次
+- ffprobe 比较
+
+**Pass**
+
+- 两次技术 metadata 一致。
+- 总时长误差在定义范围内。
+- 无黑帧/缺音轨/字幕失败。
+- Shot replacement 后重 render 正确。
+
+**Evidence**
+
+- FFmpeg command snapshot
+- ffprobe JSON
+- output artifacts
+
+**Effort** 0.5 day。
+
+## SPIKE-07 — Progress delivery SSE vs polling（P1）
+
+**Question**  
+MVP 是否需要 SSE，还是轮询已经足够？
+
+**Hypothesis**  
+SSE 适合单向进度事件；轮询可作为兜底；WebSocket 不需要。
+
+**Minimal experiment**
+
+- FastAPI 暴露 event stream。
+- Next.js 页面接收 20–50 个模拟事件。
+- 断网/刷新重连。
+
+**Pass**
+
+- reconnect 后可以用 cursor 补事件或 REST state 恢复。
+- 不需要 WebSocket 才能满足 UX。
+
+**Evidence**
+
+- browser recording/log
+- API event fixture
+
+**Effort** 0.25–0.5 day。
+
+**说明：** P1，不阻止开始 Architecture；如果实现成本高，首 Mock 可以轮询。
+
+## SPIKE-08 — FastAPI OpenAPI → TypeScript contract（P1）
+
+**Question**  
+如何减少 Next.js 和 FastAPI contract drift？
+
+**Hypothesis**  
+OpenAPI 生成 TS types/client 足够，无需共享跨语言领域源码。
+
+**Minimal experiment**
+
+- 3 个核心 endpoint schema。
+- 生成 TypeScript types。
+- CI 检查 schema drift。
+
+**Pass**
+
+- 改 Pydantic schema 后生成差异可见。
+- 前端编译能暴露破坏性变化。
+
+**Evidence**
+
+- generated diff
+- CI command output
+
+**Effort** 0.25 day。
+
+---
+
+# 11. Recommended architecture direction
+
+若 P0 Spikes 通过，Architecture 应以以下方向为基线：
+
+```text
+                         ┌───────────────────────┐
+                         │       Next.js Web     │
+                         │ UI / Review / Events  │
+                         └───────────┬───────────┘
+                                     │ REST + SSE/poll
+                                     ▼
+                         ┌───────────────────────┐
+                         │      FastAPI API      │
+                         │ Commands / Queries    │
+                         └──────┬────────┬───────┘
+                                │        │
+                                │        └───────────────┐
+                                ▼                        ▼
+                       ┌────────────────┐       ┌────────────────┐
+                       │   PostgreSQL   │       │ Temporal Client│
+                       │ domain truth   │       └───────┬────────┘
+                       └────────────────┘               ▼
+                                               ┌───────────────────┐
+                                               │ Project Workflow  │
+                                               │ Shot orchestration│
+                                               └───────┬───────────┘
+                                                       │ Activities
+                                  ┌────────────────────┼─────────────────┐
+                                  ▼                    ▼                 ▼
+                         ┌────────────────┐   ┌────────────────┐  ┌───────────────┐
+                         │ Mock/Provider  │   │ Media Worker   │  │ QC Activities │
+                         │   Adapters     │   │ FFmpeg/ffprobe │  │ rules / later │
+                         └───────┬────────┘   └───────┬────────┘  └───────────────┘
+                                 │                    │
+                                 └─────────┬──────────┘
+                                           ▼
+                                  ┌──────────────────┐
+                                  │ Storage Adapter  │
+                                  │ local → S3/OSS   │
+                                  └──────────────────┘
+```
+
+### Domain truth
+
+PostgreSQL 保存：
+
+- Project / Brief / Story / Script versions
+- Character / Look / Location / Prop
+- Shot / ShotVersion / DependencyEdge
+- Asset / AssetLineage / Selection
+- Operation / ProviderAttempt / InboxEvent
+- Review / Issue / RepairCycle
+- Timeline / TimelineVersion
+- Budget / BudgetReservation / CostEvent
+- EvidenceRecord / StateTransition
+
+### Workflow truth
+
+Temporal 保存：
+
+- 当前执行到哪一步
+- timer / retry
+- fan-out / join
+- signal / update
+- Activity result history
+
+不要把 Temporal history 复制成领域数据库，也不要让 UI 直接依赖 Temporal query 作为唯一数据源。
+
+### AI boundary
+
+LLM/VLM 未来负责：
+
+- story planning
+- screenplay
+- shot planning
+- route recommendation
+- continuity analysis
+- QC diagnosis
+- repair planning
+
+确定性系统负责：
+
+- state transition
+- operation id
+- budget
+- provider submission
+- retry policy
+- asset publish
+- FFmpeg
+- technical QC
+- authorization
+- Evidence
+
+---
+
+# 12. EXPLORE Gate checklist
+
+| Gate | 状态 | 说明 |
+|---|---|---|
+| Intent 未被修改 | PASS | 保持批准版本 |
+| Decisions 未被静默改写 | PASS | DEC-010 等保持 |
+| 技术栈方向有理由 | PASS | 暂无推翻证据 |
+| 微服务风险识别 | PASS | 模块化单体优先 |
+| Temporal 风险识别 | PASS | 已列出 P0 验证 |
+| Next.js/FastAPI 边界识别 | PASS | FastAPI 为唯一领域 API |
+| Shot Graph 语义识别 | PASS | Timeline 与依赖图分离 |
+| 幂等与重复付费风险识别 | PASS | SUBMISSION_UNKNOWN / reconciliation |
+| Repair 计数边界识别 | PASS | 仅 creative repair 计入 2 次 |
+| Mock 最小架构定义 | PASS | 真实媒体 + failure injection |
+| 成本并发风险识别 | PASS | BudgetReservation |
+| Evidence 方向定义 | PASS | 可导出派生索引 |
+| 必要 Spikes 定义 | PASS | 6 个 P0 + 2 个 P1 |
+| 真实 Provider 已锁定 | NOT REQUIRED | 应在真实 Provider 阶段再决定 |
+| Production Architecture 已批准 | NOT YET | 需 P0 Evidence |
+
+## Gate judgement
+
+**EXPLORE_GATE = PASS**
+
+含义：
+
+- 不需要继续扩大 Explore 文档。
+- 不需要再做一轮大范围技术研究。
+- 可以开始 P0 Spikes。
+- P0 Spikes 只验证关键架构风险，不开发产品功能。
+- P0 Evidence 通过后，直接编写 `05_ARCHITECTURE.md`、`06_DATA_CONTRACTS.md`、`07_STATE_MACHINES.md`。
+
+---
+
+# 13. Recommended next step（推荐下一步）
+
+## 13.1 Product Owner 现在需要批准的事情
+
+批准本报告的 Explore Gate 结论，以及 P0 Spikes 的范围。
+
+不需要逐条批准每一个技术细节；具体实现结论由 Evidence 决定。
+
+## 13.2 Codex 下一任务
+
+执行一个**临时 `spikes/` 技术验证 Harness**，仅实现：
+
+1. SPIKE-01/02 Temporal durability + versioning + pause/resume
+2. SPIKE-03 Provider unknown submission / idempotency
+3. SPIKE-04 concurrent budget reservation
+4. SPIKE-05 Shot Graph invalidation
+5. SPIKE-06 FFmpeg deterministic render
+
+P1 的 SSE 和 OpenAPI/TS contract 可以在 P0 之后做，不阻断 Architecture。
+
+## 13.3 Evidence 输出
+
+建议只生成一份轻量报告：
+
+```text
+SPIKE_EVIDENCE.md
+```
+
+并保存必要 artifact 到：
+
+```text
+evidence/spikes/
+```
+
+不要为每个 Spike 创建大量 ADR 和独立文档。
+
+每项只记录：
+
+- hypothesis
+- command/test
+- result
+- evidence path
+- PASS / FAIL
+- architecture consequence
+
+## 13.4 Architecture Gate
+
+只有以下情况需要回到 Product Owner：
+
+- P0 Spike FAIL，需要改变已批准的 DEC-010 或关键产品能力。
+- 需要增加新的重大基础设施。
+- 预算/安全/用户体验边界发生变化。
+
+如果 P0 全部 PASS，则直接进入：
+
+```text
+05_ARCHITECTURE.md
+06_DATA_CONTRACTS.md
+07_STATE_MACHINES.md
+08_PROVIDER_SPEC.md
+09_EVALUATION_SPEC.md
+10_SECURITY_AND_RIGHTS.md
+```
+
+随后才编写 `IMPLEMENTATION_PLAN.md`。
+
+---
+
+## 调研证据与局限
+
+本报告基于现有项目文档和官方技术文档方向形成。真实 Provider 的最新价格、区域可用性、模型质量、中文口型和 VLM QC 能力仍需要在 Provider Integration 阶段用基准样片验证，不能由本 Explore 报告直接锁定。
+
+---
+
+> **STOP / WAITING FOR PRODUCT OWNER APPROVAL**  
+> `EXPLORE_GATE = PASS`。本阶段不创建生产功能代码；下一步仅执行已定义的 P0 技术 Spikes，并用 Evidence 决定 Architecture。
