@@ -54,7 +54,7 @@ RUNNING/ROUGH_CUT_READY/DELIVERABLE_READY → FAILED (project-wide terminal fail
 | any nonterminal | user cancellation intent validated | `CANCELLED` | Human / Product Owner | set global cancellation gate, propagate cancel requests, retain bytes/cost/evidence |
 | `RUNNING`, `ROUGH_CUT_READY`, `DELIVERABLE_READY` | explicit project-wide unrecoverable decision after Issue resolution | `FAILED` | Human / Product Owner or Domain Service under approved policy | terminal reason/evidence; no inference from one Shot failure |
 
-`ACCEPTED`, `CANCELLED`, and `FAILED` are terminal for that ProjectVersion production run. Further creative work requires a new ProjectVersion/run; prior acceptance remains auditable.
+`ACCEPTED`, `CANCELLED`, and `FAILED` are terminal for the MVP Project. ProjectVersion editing, rollback, regeneration, and change requests occur before `ACCEPTED`. MVP introduces no ProductionRun entity or post-acceptance restart path; if post-acceptance production is required later, a separate production-run/version lifecycle must be designed outside this scope.
 
 ## 3. Project execution gates and health projection
 
@@ -94,7 +94,11 @@ Health is rebuildable UI projection, not durable lifecycle:
 
 Multiple conditions may exist; API returns primary health plus reasons rather than persisting one lossy enum.
 
-## 4. Shot lifecycle
+## 4. Shot production state and ShotVersion status
+
+Shot is the stable aggregate. Its `production_state` records current production progress. ShotVersion has an independent `version_status` that records version validity/selection semantics. `INVALIDATED` and `SUPERSEDED` never appear in Shot `production_state`.
+
+### 4.1 Shot `production_state`
 
 ```text
 PLANNED → KEYFRAME_IN_PROGRESS → KEYFRAME_READY
@@ -104,8 +108,6 @@ PLANNED → KEYFRAME_IN_PROGRESS → KEYFRAME_READY
 QC_IN_PROGRESS → REPAIR_PLANNED → CANDIDATE_GENERATING
 QC_IN_PROGRESS/REPAIR_PLANNED → WAITING_HUMAN
 WAITING_HUMAN → REPAIR_PLANNED | APPROVED | REJECTED | CANCELLED
-Any usable state → INVALIDATED → PLANNED/REPAIR_PLANNED
-Committed replacement → SUPERSEDED
 Nonterminal → CANCELLED
 ```
 
@@ -123,12 +125,25 @@ Nonterminal → CANCELLED
 | `WAITING_HUMAN` | human approves a changed repair strategy and budget | `REPAIR_PLANNED` | Human / Product Owner | normal command, new ShotVersion/Operation as needed; no counter reset |
 | `WAITING_HUMAN` | human selects acceptable existing candidate/accepts risk with valid Review policy | `APPROVED` | Human / Product Owner | resolution and acceptance Review/evidence |
 | `WAITING_HUMAN` | human rejects Shot | `REJECTED` | Human / Product Owner | Issue resolved; downstream Impact Plan |
-| `APPROVED`, `KEYFRAME_READY`, `CANDIDATES_READY`, `WAITING_HUMAN` | approved source change impact marks version unusable | `INVALIDATED` | Domain/Application Service | Impact Plan and new version; bytes retained |
-| `INVALIDATED` | new ShotVersion committed | `PLANNED` or `REPAIR_PLANNED` | Domain/Application Service | choice depends on whether change is repair or creator edit |
 | any nonterminal | local cancellation intent | `CANCELLED` | Human / Product Owner or parent cancellation policy | cancel unstarted work; reconcile accepted work |
-| any nonterminal/approved version | newer ShotVersion becomes current replacement | `SUPERSEDED` | Domain/Application Service | historical selections/bytes remain |
 
-`REJECTED`, `CANCELLED`, and `SUPERSEDED` are terminal for the ShotVersion. `FAILED` is intentionally not a final Shot state: failures are Operation/Job facts that lead to repair, Issue, rejection, or cancellation.
+`REJECTED` and `CANCELLED` are terminal Shot production states. `FAILED` is intentionally not a final Shot state: failures are Operation/Job facts that lead to repair, Issue, rejection, or cancellation.
+
+### 4.2 ShotVersion `version_status`
+
+```text
+DRAFT → COMMITTED → INVALIDATED
+                  ↘ SUPERSEDED
+```
+
+| From | Event / guard | To | Initiating authority | Required effects |
+|---|---|---|---|---|
+| — | version draft created for stable Shot | `DRAFT` | Domain/Application Service | parent version and change reason recorded |
+| `DRAFT` | content validates and is committed immutably | `COMMITTED` | Domain/Application Service | content hash, ShotSpec, and exact source refs fixed |
+| `COMMITTED` | approved source change makes this version or outputs no longer valid | `INVALIDATED` | Domain/Application Service | Impact Plan, invalidation reason, and retained bytes/lineage/evidence |
+| `COMMITTED` | a replacement committed version becomes current without declaring prior outputs invalid | `SUPERSEDED` | Domain/Application Service | replacement pointer and reason; prior version remains auditable |
+
+When approved source change requires new work, the old ShotVersion becomes `INVALIDATED` or `SUPERSEDED`, the new ShotVersion becomes `COMMITTED`, and the stable Shot `production_state` moves to `PLANNED` for creator/input changes or `REPAIR_PLANNED` for an authorized creative repair. This cross-machine command is atomic from the domain perspective. It does not change or reset `Shot.creative_repair_cycles_used`.
 
 ## 5. Job lifecycle
 
@@ -159,26 +174,26 @@ QUEUED/CLAIMED/RUNNING → CANCEL_REQUESTED → CANCELLED
 An Operation is one logical side effect. These states are authoritative for paid-idempotency behavior.
 
 ```text
-PLANNED → RESERVED → SUBMITTING → SUBMITTED → SUCCEEDED
+PLANNED → AUTHORIZED → SUBMITTING → SUBMITTED → SUCCEEDED
                          ↘ SUBMISSION_UNKNOWN → RECONCILING → SUBMITTED | SUCCEEDED | FAILED
 SUBMITTED → RECONCILING → SUBMITTED | SUCCEEDED | FAILED
-PLANNED/RESERVED/SUBMITTING/SUBMITTED/SUBMISSION_UNKNOWN/RECONCILING
+PLANNED/AUTHORIZED/SUBMITTING/SUBMITTED/SUBMISSION_UNKNOWN/RECONCILING
   → CANCEL_REQUESTED → CANCELLED | SUCCEEDED | FAILED
 ```
 
 | From | Event / guard | To | Initiating authority | Required effects |
 |---|---|---|---|---|
 | — | stable logical intent accepted | `PLANNED` | Domain/Application Service | deterministic Operation ID and intent hash |
-| `PLANNED` | atomic upper-bound reservation succeeds | `RESERVED` | Domain/Application Service | link active BudgetReservation; paid operations only |
-| `PLANNED` | operation is provably free/no reservation required | `RESERVED` | Domain/Application Service | record zero/no-charge policy evidence |
-| `RESERVED` | submit command begins; gate still open | `SUBMITTING` | Orchestration Adapter request | same stable client reference/idempotency key |
+| `PLANNED` | paid execution is approved and linked BudgetReservation is `ACTIVE` | `AUTHORIZED` | Domain/Application Service | persist authorization basis and reservation ID; Operation state remains independent of reservation state |
+| `PLANNED` | operation is provably free under an explicit persisted no-charge policy fact | `AUTHORIZED` | Domain/Application Service | persist policy fact; no BudgetReservation exists |
+| `AUTHORIZED` | submit command begins; gate open and paid reservation is still `ACTIVE`, or free authorization fact remains valid | `SUBMITTING` | Orchestration Adapter request | same stable client reference/idempotency key; fail closed if authorization prerequisite is absent |
 | `SUBMITTING` | provider acceptance and external job ID known | `SUBMITTED` | Provider Adapter fact via Application Service | create/update ProviderAttempt; retain reservation |
 | `SUBMITTING` | response lost/ambiguous after request may have reached provider | `SUBMISSION_UNKNOWN` | Provider Adapter/transport fact via Application Service | prohibit automatic new paid submit; schedule reconciliation |
 | `SUBMISSION_UNKNOWN`, `SUBMITTED` | lookup/poll/callback reconciliation starts | `RECONCILING` | System reconciliation job | query by client ref/external ID; no blind submit |
 | `RECONCILING` | provider confirms accepted/running | `SUBMITTED` | Provider Adapter fact | record observation and external job ID |
 | `SUBMITTED`, `RECONCILING` | provider result validated and immutable output finalized | `SUCCEEDED` | Application Service after Provider/Storage/QC facts | settle reservation, CostEvents, assets/lineage/evidence |
 | `SUBMITTED`, `RECONCILING` | provider confirms terminal failure/no usable result | `FAILED` | Application Service | settle/release as real billing facts require |
-| `RECONCILING` | provider proves no submission exists and policy authorizes retry | `RESERVED` | Domain/Application Service | same Operation ID; new ProviderAttempt allowed; explicit proof recorded |
+| `RECONCILING` | provider proves no submission exists and execution authorization remains valid | `AUTHORIZED` | Domain/Application Service | same Operation ID; new ProviderAttempt allowed; proof recorded; paid reservation must remain `ACTIVE` |
 | `SUBMISSION_UNKNOWN`, `RECONCILING` | uncertainty cannot be resolved within policy | `FAILED` | Human / Product Owner or approved application policy | Issue/evidence; never automatically create new paid Operation |
 | any nonterminal | cancellation intent validated | `CANCEL_REQUESTED` | Human/Application Service or parent cancellation | ask provider when supported; retain facts |
 | `CANCEL_REQUESTED` | provider confirms cancellation or no submit occurred | `CANCELLED` | Application Service after Provider/reconciliation fact | settle/release from actual billing facts |
@@ -395,7 +410,7 @@ Allowed human commands may select an existing candidate, approve a new repair st
 5. Project `DELIVERABLE_READY` requires final technical Review pass and immutable deliverable/evidence package.
 6. Project `ACCEPTED` requires a Human/Product Owner Review of the exact deliverable version.
 7. Asset `PUBLISHED` precedes its use in a TimelineVersion or successful Operation result.
-8. Operation cannot enter `SUBMITTING` without an active reservation (or recorded free-operation exemption) and open execution gate.
+8. Operation and BudgetReservation are independent machines. A paid Operation cannot enter `AUTHORIZED` or `SUBMITTING` without its linked BudgetReservation `ACTIVE`; a free Operation requires an explicit persisted no-charge policy fact and no reservation. The execution gate must also be open.
 9. BudgetReservation terminal state and CostEvent ledger must reconcile, including cancellation races/refunds.
 10. Unsupported schema/workflow payload versions open an Issue/gate as scoped; they are not silently interpreted.
 
@@ -415,6 +430,9 @@ Reviewed inputs: `INTENT.md`, `02_DECISIONS.md`, `03_PRODUCT_SPEC.md`, `04_USER_
 | Asset overwrite | local filesystem language could imply rename contract/overwrite | Storage publish abstraction and immutable AssetVersions; rename only possible local technique |
 | repair budget | older job/task wording leaves loopholes | five counters separated; Shot-level persistent creative repair count only |
 | audit/evidence | minimum facts previously scattered | common transition audit, lineage, inbox/outbox, costs, Reviews, Evidence contracts centralized |
+| Shot versus ShotVersion | initial draft conflated production progress with invalidation/supersession | Shot uses only `production_state`; ShotVersion independently uses `version_status`; replacement does not reset repair count |
+| Operation versus reservation | initial draft coupled Operation authorization to reservation state | Operation uses `AUTHORIZED`; paid authorization/submission requires independent BudgetReservation `ACTIVE`, while free authorization uses persisted no-charge fact |
+| accepted terminal scope | initial draft referred to an undefined ProjectVersion production run | `ACCEPTED` is terminal for the MVP Project; all version editing/regeneration occurs before acceptance and no ProductionRun entity is introduced |
 
 ### 18.1 Contradictions found
 
@@ -429,6 +447,14 @@ These drafts treat the later explicit Product Owner clarifications as authoritat
 
 None required to review these two specifications. Implementation-time decisions remain intentionally deferred: Temporal child-workflow versus activity topology, exact Temporal versioning convention, supported long-lived Temporal deployment, SSE versus polling default, provider-specific idempotency capabilities, retention durations, and physical storage vendor semantics.
 
+### 18.3 Final correction verification
+
+- Shot and ShotVersion state are no longer conflated: Shot has only `production_state`; ShotVersion has only `version_status`.
+- Operation authorization and BudgetReservation lifecycle are independent: paid authorization and submission require the linked reservation to remain `ACTIVE`; free authorization requires a persisted no-charge fact and no reservation.
+- `Shot.creative_repair_cycles_used` remains on the stable Shot and survives every ShotVersion replacement.
+- `ACCEPTED` is terminal for the MVP Project and introduces no ProductionRun entity or implied restart path.
+- Re-review found no new contradiction with `INTENT.md` or `02_DECISIONS.md`; the two previously recorded legacy vocabulary contradictions remain unchanged and explicitly handled.
+
 ## Gate
 
-STATE_MACHINES_GATE = READY_FOR_REVIEW
+STATE_MACHINES_GATE = READY_FOR_FINAL_REVIEW

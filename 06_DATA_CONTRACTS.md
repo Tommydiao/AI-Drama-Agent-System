@@ -74,7 +74,7 @@ References point to stable aggregate IDs or immutable version IDs deliberately. 
 - **Uniqueness:** optional normalized title is not globally unique; commands use `project_id`.
 - **Lifecycle fields:** lifecycle state only; execution gate and health are separate projections in Section 16.
 - **Audit/delete:** common audit, transition log, soft-delete after cancellation/retention checks.
-- **Invariants:** one active committed ProjectVersion; local Shot issues never change Project lifecycle to `WAITING_HUMAN`; `ACCEPTED` requires an accepted deliverable Review.
+- **Invariants:** one active committed ProjectVersion; local Shot issues never change Project lifecycle to `WAITING_HUMAN`; `ACCEPTED` requires an accepted deliverable Review and is terminal for the MVP Project. ProjectVersion editing, rollback, and regeneration occur before `ACCEPTED`; post-acceptance production is outside MVP.
 
 ### 4.2 ProjectVersion
 
@@ -87,7 +87,7 @@ References point to stable aggregate IDs or immutable version IDs deliberately. 
 - **Uniqueness:** `(project_id, version_number)`; at most one active draft per editing session/command policy.
 - **Lifecycle fields:** `DRAFT`, `COMMITTED`, `SUPERSEDED` (selection status, not deletion).
 - **Audit/delete:** committed versions cannot be deleted while referenced; draft may be discarded.
-- **Invariants:** every paid Operation binds one committed ProjectVersion; rollback creates/selects a new current version and never rewrites history.
+- **Invariants:** every paid Operation binds one committed ProjectVersion; before Project `ACCEPTED`, rollback creates/selects a new current version and never rewrites history. No new production-run concept is introduced for MVP.
 
 ### 4.3 ProductionBrief
 
@@ -210,22 +210,22 @@ References point to stable aggregate IDs or immutable version IDs deliberately. 
 - **References:** `current_shot_version_id`, selected candidate AssetVersion, open Issues.
 - **Versioning:** mutable aggregate shell over immutable ShotVersions.
 - **Immutable:** identity and original project.
-- **Mutable:** lifecycle state, selected-version pointers, local repair count, cancellation intent.
+- **Mutable:** `production_state`, selected-version pointers, local repair count, cancellation intent.
 - **Uniqueness:** human-readable shot code unique per project; not the primary key.
-- **Lifecycle/audit/delete:** follows Shot machine; removed shots are superseded/cancelled, not erased.
-- **Invariants:** `creative_repair_cycles_used` is shot-level, persists across jobs/operations, and cannot be reset by changing IDs; maximum is 2 unless Product Owner changes DEC-012.
+- **Lifecycle/audit/delete:** `production_state` follows the Shot production machine: `PLANNED`, `KEYFRAME_IN_PROGRESS`, `KEYFRAME_READY`, `CANDIDATE_GENERATING`, `CANDIDATES_READY`, `QC_IN_PROGRESS`, `REPAIR_PLANNED`, `WAITING_HUMAN`, `APPROVED`, `REJECTED`, or `CANCELLED`. Removed work is rejected/cancelled through normal commands, not erased.
+- **Invariants:** Shot is the stable production aggregate. `creative_repair_cycles_used` is stored on Shot, persists across jobs, operations, and ShotVersion replacement, and cannot be reset by changing IDs; maximum is 2 unless Product Owner changes DEC-012. `INVALIDATED` and `SUPERSEDED` are never Shot production states.
 
 ### 7.2 ShotVersion
 
 - **Purpose:** immutable snapshot of production intent and selections for one Shot.
 - **Identity/ownership:** `shot_version_id`, shot/project/workspace, monotonic version.
 - **References:** ShotSpec, source Scene/content/creative versions, candidates, selected asset.
-- **Versioning:** immutable after commit; parent and change reason required.
+- **Versioning:** `version_status` is independent of Shot `production_state` and uses `DRAFT`, `COMMITTED`, `INVALIDATED`, or `SUPERSEDED`; content is immutable after `COMMITTED`, and parent/change reason are required.
 - **Immutable after commit:** all references, strategy version, content hash.
-- **Mutable:** draft only.
+- **Mutable:** draft content before commit; after commit, only the audited `version_status` may transition to `INVALIDATED` or `SUPERSEDED` without changing version content.
 - **Uniqueness:** `(shot_id, version_number)`.
-- **Lifecycle/audit/delete:** draft/committed/superseded/invalidated; retained.
-- **Invariants:** operations and graph edges bind ShotVersion, not merely Shot.
+- **Lifecycle/audit/delete:** `DRAFT → COMMITTED → INVALIDATED | SUPERSEDED`; all committed versions are retained.
+- **Invariants:** operations and graph edges bind ShotVersion, not merely Shot. An approved source change marks the old ShotVersion `INVALIDATED` when its outputs are no longer valid, or `SUPERSEDED` when a replacement merely becomes current; the replacement ShotVersion is `COMMITTED`, while stable Shot `production_state` returns to `PLANNED` or `REPAIR_PLANNED`. Shot repair count is unchanged by this version transition.
 
 ### 7.3 ShotSpec
 
@@ -355,13 +355,13 @@ Local storage may use fsync/rename; S3/OSS may use multipart completion/copy/con
 
 - **Purpose:** one logical side effect, especially one potentially paid provider action.
 - **Identity/ownership:** deterministic stable `operation_id`, workspace/project.
-- **References:** exact ProjectVersion, target version, operation type, route/strategy version, BudgetReservation, ProviderAttempts, resulting AssetVersions.
+- **References:** exact ProjectVersion, target version, operation type, route/strategy version, optional BudgetReservation for paid work, execution-authorization fact, ProviderAttempts, resulting AssetVersions.
 - **Versioning:** logical intent is immutable; a materially new intent is a new Operation.
 - **Immutable:** identity inputs, canonical intent hash, paid flag, created correlation/causation.
-- **Mutable:** lifecycle state, resolved ProviderAttempt/result, cancellation intent, terminal reason.
+- **Mutable:** lifecycle state, persisted authorization basis, resolved ProviderAttempt/result, cancellation intent, terminal reason.
 - **Uniqueness:** `operation_id` primary uniqueness plus `(workspace_id, canonical_intent_hash, operation_type)` guard where applicable.
 - **Lifecycle/audit/delete:** follows Operation machine; never deleted while costs/evidence/attempts exist.
-- **Invariants:** retry never invents a new operation; `SUBMISSION_UNKNOWN` must reconcile before resubmission.
+- **Invariants:** retry never invents a new operation; `SUBMISSION_UNKNOWN` must reconcile before resubmission. A paid Operation may become `AUTHORIZED` only with an `ACTIVE` BudgetReservation and must still have it when submission begins. A provably free Operation may become `AUTHORIZED` only from an explicit persisted free/no-charge policy fact and has no BudgetReservation.
 
 #### Stable `operation_id` semantics
 
@@ -580,9 +580,9 @@ Projections never originate state transitions. If they disagree with authoritati
 ## 17. Cross-contract invariants
 
 1. No project/workspace cross-reference is permitted.
-2. Every paid submission has one stable Operation, an atomic BudgetReservation, ProviderAttempt facts, and eventual CostEvent reconciliation.
+2. Every paid submission has one stable Operation, an atomic `ACTIVE` BudgetReservation independent from Operation state, ProviderAttempt facts, and eventual CostEvent reconciliation; free Operations instead require an explicit persisted no-charge authorization fact.
 3. `SUBMISSION_UNKNOWN` cannot trigger an automatic new paid submission.
-4. Only a QC-driven strategy-changing creative repair increments the persistent Shot repair counter.
+4. Only a QC-driven strategy-changing creative repair increments the persistent Shot repair counter; ShotVersion invalidation, supersession, or replacement never resets it.
 5. A local Issue cannot globally stop independent Shots; only explicit project-wide gate reasons can block new paid work.
 6. Timeline order and DependencyEdge semantics never substitute for one another.
 7. Published bytes, lineage, costs, evidence, callbacks, and transition history are immutable/append-only.
@@ -590,4 +590,4 @@ Projections never originate state transitions. If they disagree with authoritati
 
 ## Gate
 
-DATA_CONTRACTS_GATE = READY_FOR_REVIEW
+DATA_CONTRACTS_GATE = READY_FOR_FINAL_REVIEW
