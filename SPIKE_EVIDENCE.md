@@ -6,20 +6,20 @@ Scope: disposable P0 experiments only. No product feature, production architectu
 
 - Hypothesis: a persisted operation ledger plus cooperative pause can survive a worker restart without a duplicate paid operation.
 - Minimal experiment: three mock shots; record provider acceptance for shot 2, simulate a crash after acceptance, replace the worker, pause before shot 3, then resume.
-- Commands/tests executed: python spikes/p0_harness.py using temporalio 1.32.0 and Temporal's local test server.
-- Result: the activity ledger proved one acceptance and one reconciliation for shot 2, but the full worker-handoff plus pause/resume run stalled on sticky workflow-task transfer.
+- Commands/tests executed: python spikes/temporal_process_controller.py using temporalio 1.32.0, a local Temporal test server, controller process, and two independently launched Worker OS processes.
+- Result: worker_v1 PID 23704 accepted shot-2 and was force-killed; worker_v2 PID 28488 was a different OS process. The original workflow did not receive a shot-2 retry/reconciliation within the bounded 30-second acceptance window, so pause/resume was not attempted.
 - Status: FAIL
-- Evidence path: evidence/spikes/spike_01.json and evidence/spikes/temporal_operations.sqlite.
-- Architecture consequence: do not approve Temporal pause/restart semantics yet. Re-run this fixture with independently launched worker processes and explicit task-queue ownership before Architecture.
+- Evidence path: evidence/spikes/spike_01_cross_process.json and evidence/spikes/temporal_cross_process.sqlite.
+- Architecture consequence: do not approve Temporal pause/restart semantics yet. This is classified as an experiment/harness problem pending reproduction against a supported long-lived Temporal deployment, not as a fundamental rejection of Temporal.
 
 ## SPIKE-02 — Temporal workflow version evolution
 
 - Hypothesis: workflow.patched can preserve an in-flight v1 workflow path while a new run takes a v2 path.
 - Minimal experiment: hold v1 at a signal wait, replace its worker with v2, release the old run, then run a fresh v2 workflow.
-- Commands/tests executed: versioned workflow definitions were prepared in spikes/temporal_workflows.py; the integrated harness was started with python spikes/p0_harness.py.
-- Result: not completed, because SPIKE-01's worker handoff did not complete safely enough to validate replay/versioning.
+- Commands/tests executed: no new SPIKE-02 run was started after the focused SPIKE-01 cross-process acceptance test failed; this follows the Product Owner stop condition.
+- Result: retained FAIL. Cross-process V1-to-V2 replay/versioning remains unproven.
 - Status: FAIL
-- Evidence path: evidence/spikes/spike_02.json and spikes/temporal_workflows.py.
+- Evidence path: evidence/spikes/spike_02_cross_process.json and evidence/spikes/spike_02.json.
 - Architecture consequence: retain the versioning requirement, but do not choose a Temporal patching convention until the separate-process replay experiment passes.
 
 ## SPIKE-03 — Provider unknown submission / idempotency

@@ -1,0 +1,6 @@
+{
+  "result": "FAIL",
+  "status": "NOT_RUN_AFTER_SPIKE_01_FAILURE",
+  "reason": "The Product Owner directed the experiment to stop if either focused cross-process Temporal spike failed. SPIKE-01 failed its bounded cross-process recovery acceptance test, so no additional SPIKE-02 attempt was made.",
+  "prior_status": "SPIKE-02 remained FAIL from the earlier same-process fixture because it did not prove cross-process replay/versioning."
+}

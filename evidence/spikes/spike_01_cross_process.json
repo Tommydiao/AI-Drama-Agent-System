@@ -1,0 +1,25 @@
+{
+  "result": "FAIL",
+  "workflow_id": "spike-01-cross-process",
+  "worker_v1": {
+    "pid": 23704,
+    "role": "durability-v1",
+    "event": "controller invoked forced subprocess termination after shot-2 provider acceptance"
+  },
+  "worker_v2": {
+    "pid": 28488,
+    "role": "durability-v2",
+    "different_from_worker_v1": true
+  },
+  "operations": [
+    {"operation_id": "project-1:shot-1:generate:v1", "state": "COMPLETED", "submissions": 1, "completions": 1},
+    {"operation_id": "project-1:shot-2:generate:v1", "state": "ACCEPTED", "submissions": 1, "completions": 0}
+  ],
+  "observed_events": [
+    {"kind": "provider_accepted", "subject": "shot-1", "attempt": 1, "pid": 23704},
+    {"kind": "completed", "subject": "shot-1", "attempt": 1, "pid": 23704},
+    {"kind": "provider_accepted", "subject": "shot-2", "attempt": 1, "pid": 23704}
+  ],
+  "failure": "After worker_v1 was force-killed and worker_v2 started, Temporal did not deliver a retry/reconciliation for shot-2 within the 30-second bounded acceptance window.",
+  "classification": "A. Experiment or harness problem until reproduced against a supported long-lived Temporal deployment; it is not evidence by itself that Temporal is unsuitable."
+}
