@@ -67,8 +67,7 @@ def create_app(repository: ProjectRepository | None = None, storage_root: Path |
 
     @app.get("/projects")
     def list_projects() -> list[dict]:
-        # Phase-1 repository has no list method yet; this keeps the local UI useful.
-        return [{"id": project_id, **project} for project_id in services if (project := repo.get_project(project_id))]
+        return repo.list_projects()
 
     @app.post("/projects/{project_id}/pause")
     def pause_project(project_id: str) -> dict:
@@ -133,6 +132,27 @@ def create_app(repository: ProjectRepository | None = None, storage_root: Path |
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         return {"project_id": project_id, "production_state": project["production_state"], "assets": [project["rough_cut_asset_id"]] if project["rough_cut_asset_id"] else [], "checks": ["ffprobe", "mock-qc", "repository-persistence"]}
+
+    @app.get("/projects/{project_id}/progress")
+    def project_progress(project_id: str) -> dict:
+        project = repo.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        ready = project["production_state"] == "ROUGH_CUT_READY"
+        return {"project_id": project_id, "phase": "DELIVERABLE_READY" if ready else "PLANNED", "percent": 100 if ready else 0, "message": "Mock 粗剪已就绪" if ready else "等待开始制作"}
+
+    @app.post("/shots/{shot_id}/commands/repair")
+    def repair_shot(shot_id: str, project_id: str) -> dict:
+        try:
+            return service_for(project_id).repair(shot_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Shot not found") from error
+
+    @app.get("/projects/{project_id}/issues")
+    def project_issues(project_id: str) -> dict:
+        if not repo.get_project(project_id):
+            raise HTTPException(status_code=404, detail="Project not found")
+        return {"issues": service_for(project_id).issues}
 
     @app.get("/assets/{asset_id}/content")
     def get_asset(asset_id: str) -> FileResponse:

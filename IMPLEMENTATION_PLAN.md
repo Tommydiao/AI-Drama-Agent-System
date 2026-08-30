@@ -55,9 +55,9 @@ Implement a deterministic `TemplateStoryPlanner` for 15×4-second shots and full
 
 Implement single-shot regeneration as a new candidate operation on the same ShotVersion where the spec is unchanged; spec-changing inputs create a new ShotVersion. Implement timeline replacement, minimal dialogue-edit impact plans, full rerendering, and unchanged-asset reuse. Test regeneration scope, timeline-version replacement, minimal invalidation, and reuse.
 
-### Phase 5 — Reliability, budget, recovery, and evidence
+### Phase 5 — Local reliability, budget, recovery, and evidence
 
-Implement PostgreSQL budget reservations, idempotency, `SUBMISSION_UNKNOWN` reconciliation, callback inbox/outbox, creative repair cap, pause/cancel, mock cost ledger, and evidence manifests. Operations become `AUTHORIZED` independently from reservations: paid authorization requires an ACTIVE reservation; provably free authorization requires a persisted no-charge policy fact. Validate Temporal through `OrchestrationPort` on a supported long-lived deployment for restart/recovery/versioning. If that gate fails, stop and report the evidence; no alternate workflow engine is introduced.
+Implement local SQLite-backed Mock budget/idempotency semantics, `SUBMISSION_UNKNOWN` reconciliation, callback inbox/outbox shape, creative repair cap, pause/cancel, mock cost ledger, and evidence manifests. Operations become `AUTHORIZED` independently from reservations: paid authorization requires an ACTIVE reservation; provably free authorization requires a persisted no-charge policy fact. PostgreSQL concurrency and supported long-lived Temporal recovery/versioning are production-readiness work, recorded in `PRODUCTION_READINESS_TODO.md`; they do not block the Local Mock MVP.
 
 ### Phase 6 — Product UI
 
@@ -87,7 +87,7 @@ Run clean, deterministic end-to-end scenarios including the benchmark story `门
 ## Implementation notes
 
 - Initial delivery path is Phase 0 → Phase 1. The complete path is Phase 0 through Phase 7.
-- The Phase 5 Temporal gate is required and has no fallback orchestration-engine path.
+- The Local Mock MVP uses the current local orchestration adapter. Temporal remains behind `OrchestrationPort` and is deferred to the production-readiness gate; no alternate production workflow engine is introduced.
 - Evidence lives under `evidence/runs/<run_id>` and includes test output, media probes, hashes, costs, and browser screenshots.
 - Docker/Compose is deferred to reproducibility hardening. The approved native Windows path uses local Node/pnpm, a Python virtual environment, FFmpeg/ffprobe, local filesystem `StoragePort`, no Temporal, and no paid providers. PostgreSQL remains the target domain store; Phase 1 may use the narrowly approved SQLite repository fallback.
 

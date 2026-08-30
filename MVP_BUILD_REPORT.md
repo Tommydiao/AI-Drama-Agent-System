@@ -1,4 +1,6 @@
-# AI Short Drama Agent — Mock MVP Build Report
+# AI Short Drama Agent — Historical Infrastructure-Gated Build Report
+
+> Superseded for local acceptance by `LOCAL_MVP_BUILD_REPORT.md`. PostgreSQL and Temporal are now explicitly deferred by Product Owner decision; this historical report is retained for traceability.
 
 ## Status
 

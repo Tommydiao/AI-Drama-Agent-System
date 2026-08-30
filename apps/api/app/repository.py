@@ -9,6 +9,9 @@ from typing import Any
 
 class ProjectRepository(ABC):
     @abstractmethod
+    def list_projects(self) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
     def create_project(self, project_id: str, title: str, premise: str) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -49,6 +52,11 @@ class SqliteProjectRepository(ProjectRepository):
             )
         return self.get_project(project_id) or {}
 
+    def list_projects(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            ids = [row[0] for row in connection.execute("SELECT id FROM projects ORDER BY rowid DESC").fetchall()]
+        return [project for project_id in ids if (project := self.get_project(project_id))]
+
     def get_project(self, project_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -70,4 +78,3 @@ class SqliteProjectRepository(ProjectRepository):
         with self._connect() as connection:
             row = connection.execute("SELECT media_path FROM assets WHERE id = ?", (asset_id,)).fetchone()
         return Path(row[0]) if row else None
-
