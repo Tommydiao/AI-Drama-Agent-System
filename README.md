@@ -38,3 +38,15 @@ $env:TEST_DATABASE_URL = 'postgresql+psycopg://USER:PASSWORD@HOST:5432/ai_drama_
 ```
 
 Local Mock development continues to use SQLite when `DRAMA_DATABASE_URL` is unset. PostgreSQL schema changes must go through Alembic; `infra/postgres/init.sql` only prepares separate local Temporal databases.
+
+## Temporal worker
+
+The production-shaped orchestration implementation uses Project and Shot Child Workflows behind `OrchestrationPort`. Start a configured Worker with:
+
+```powershell
+$env:TEMPORAL_TARGET = '127.0.0.1:7233'
+$env:TEMPORAL_NAMESPACE = 'default'
+.\scripts\run-temporal-worker.ps1
+```
+
+The application test suite starts an official Temporal test service automatically. The cross-process recovery/version Gate is `spikes/temporal_process_controller.py`; production still requires a private persistent Temporal service with TLS, monitoring, and backup.

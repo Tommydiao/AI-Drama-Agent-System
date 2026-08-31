@@ -36,6 +36,7 @@ async def durability_paid_operation(shot: str) -> str:
             first_accept = True
         else:
             first_accept = False
+    activity.heartbeat({"operation_id": operation_id, "state": "ACCEPTED"})
     if shot == "shot-2" and first_accept:
         # Controller force-kills this worker process after this durable acceptance record.
         await asyncio.sleep(300)

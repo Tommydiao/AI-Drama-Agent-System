@@ -92,7 +92,8 @@ async def run() -> None:
     server_dir.mkdir(parents=True, exist_ok=True)
     workers: list[subprocess.Popen[bytes]] = []
     try:
-        async with await WorkflowEnvironment.start_time_skipping(download_dest_dir=str(server_dir)) as env:
+        # Cross-process workers need a normal long-lived dev service, not the time-skipping test server.
+        async with await WorkflowEnvironment.start_local(download_dest_dir=str(server_dir)) as env:
             client: Client = env.client
             target = client.service_client.config.target_host
 

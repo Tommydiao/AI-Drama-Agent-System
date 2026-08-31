@@ -1,6 +1,30 @@
 {
-  "result": "FAIL",
-  "status": "NOT_RUN_AFTER_SPIKE_01_FAILURE",
-  "reason": "The Product Owner directed the experiment to stop if either focused cross-process Temporal spike failed. SPIKE-01 failed its bounded cross-process recovery acceptance test, so no additional SPIKE-02 attempt was made.",
-  "prior_status": "SPIKE-02 remained FAIL from the earlier same-process fixture because it did not prove cross-process replay/versioning."
+  "checks": {
+    "new_v2_path": true,
+    "no_replay_failure": true,
+    "old_v1_compatible": true,
+    "separate_worker_processes": true
+  },
+  "new_workflow_id": "spike-02-new",
+  "new_workflow_result": "v2-path",
+  "old_workflow_id": "spike-02-old",
+  "old_workflow_result": "v1-compatible-path",
+  "result": "PASS",
+  "worker_v1": {
+    "controller_child_pid": 18836,
+    "pid": 1544,
+    "queue": "spike-02-cross-process",
+    "role": "version-v1"
+  },
+  "worker_v1_forced_termination": {
+    "forced": true,
+    "pid": 18836,
+    "returncode": 1
+  },
+  "worker_v2": {
+    "controller_child_pid": 5812,
+    "pid": 26144,
+    "queue": "spike-02-cross-process",
+    "role": "version-v2"
+  }
 }

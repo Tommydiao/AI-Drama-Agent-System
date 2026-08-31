@@ -32,6 +32,7 @@ class DurabilityWorkflow:
                     "durability_paid_operation",
                     shot,
                     start_to_close_timeout=timedelta(seconds=120),
+                    heartbeat_timeout=timedelta(seconds=2),
                     retry_policy=RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=1)),
                 )
             )
@@ -42,6 +43,7 @@ class DurabilityWorkflow:
                 "durability_paid_operation",
                 "shot-3",
                 start_to_close_timeout=timedelta(seconds=120),
+                heartbeat_timeout=timedelta(seconds=2),
                 retry_policy=RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=1)),
             )
         )
@@ -79,10 +81,12 @@ class VersionWorkflowV2:
 
     @workflow.run
     async def run(self, label: str) -> str:
+        # This marker must be evaluated before the persisted wait so old histories replay false.
+        use_v2_path = workflow.patched("spike-02-v2-path")
         await workflow.execute_activity(
             "record_version_wait",
             label,
             start_to_close_timeout=timedelta(seconds=30),
         )
         await workflow.wait_condition(lambda: self.release)
-        return "v2-path" if workflow.patched("spike-02-v2-path") else "v1-compatible-path"
+        return "v2-path" if use_v2_path else "v1-compatible-path"
