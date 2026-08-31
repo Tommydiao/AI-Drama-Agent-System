@@ -8,10 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .config import DATABASE_PATH, STORAGE_ROOT
+from .config import STORAGE_ROOT
 from .media import render_three_shot_story
 from .mock_mvp import MockProductionService
-from .repository import ProjectRepository, SqliteProjectRepository
+from .repository import ProjectRepository, create_default_repository
 
 
 class CreateProjectRequest(BaseModel):
@@ -20,7 +20,7 @@ class CreateProjectRequest(BaseModel):
 
 
 def create_app(repository: ProjectRepository | None = None, storage_root: Path | None = None) -> FastAPI:
-    repo = repository or SqliteProjectRepository(DATABASE_PATH)
+    repo = repository or create_default_repository()
     output_root = storage_root or STORAGE_ROOT
     services: dict[str, MockProductionService] = {}
     impact_plans: dict[str, dict] = {}
@@ -34,7 +34,7 @@ def create_app(repository: ProjectRepository | None = None, storage_root: Path |
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "persistence": "sqlite-phase1"}
+        return {"status": "ok", "persistence": repo.persistence_name}
 
     def service_for(project_id: str) -> MockProductionService:
         service = services.setdefault(project_id, MockProductionService())

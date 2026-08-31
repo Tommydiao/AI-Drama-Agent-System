@@ -2,8 +2,8 @@
 
 These items are intentionally deferred and do not block the Local Mock MVP.
 
-- Replace the temporary SQLite `ProjectRepository` with the PostgreSQL adapter and run migration/integration tests.
-- Prove PostgreSQL transaction/locking behavior for concurrent `BudgetReservation` authorization.
+- Run the implemented Alembic/PostgreSQL repository and migration suite against an available PostgreSQL integration database.
+- Execute `scripts/test-postgres.ps1` to prove the implemented row-locking behavior for concurrent `BudgetReservation` authorization; this environment currently has no Docker or PostgreSQL service.
 - Deploy a supported long-lived Temporal service behind `OrchestrationPort`.
 - Re-run worker handoff, restart recovery, deterministic retry, and workflow-versioning evidence against Temporal.
 - Harden Docker/WSL Compose reproducibility for team onboarding.
